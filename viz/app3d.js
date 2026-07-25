@@ -1045,8 +1045,12 @@ function showChokepoint(c) {
     rows.push(["On its own", "opens nothing"]);
   }
   if (c.chosen) rows.push(["Optimiser", "selected within budget"]);
+  rows.push(["", `<button id="cpwo" class="prim" style="margin-top:7px;` +
+    `font-size:11px;padding:5px 10px">Issue work order</button>`]);
   el("cpfacts").innerHTML = rows.map(([k, v]) =>
     `<dt>${k}</dt><dd>${v}</dd>`).join("");
+  const wob = el("cpwo");
+  if (wob) wob.addEventListener("click", () => openWorkOrder(cpOpen));
 
   // Anchor the panel to the marker's projected position, clamped inside
   // the viewport so a marker near an edge does not push it off-screen.
@@ -1066,6 +1070,89 @@ function showChokepoint(c) {
 }
 
 function hideChokepoint() { cpOpen = null; el("cppop").hidden = true; }
+
+/* ---------- work order ---------- */
+/* An auditor that finds an issue and cannot hand it to anybody has not
+   finished the job. This is the ticket: what, where, which clause, what
+   it costs, who it excludes, and a picture of the spot -- printable to
+   PDF through the browser rather than a mocked-up image of one. */
+function fmtPos(it) {
+  return `x ${it.pos[0].toFixed(1)} m, y ${it.pos[1].toFixed(1)} m`;
+}
+
+function openWorkOrder(it) {
+  if (!it) return;
+  const wo = el("wo");
+  const num = ISSUES.findIndex(q => q.id === it.id) + 1;
+  el("woid").textContent =
+    "AT-" + String(D.seed).padStart(2, "0") + "-" +
+    String(num || 1).padStart(3, "0");
+  el("woh").textContent = it.detail;
+
+  // Settle the camera and draw before grabbing, or the crop catches the
+  // view from wherever the camera happened to be a second ago -- which
+  // is a black rectangle if it was still flying.
+  camState.pos.copy(camGoal.pos);
+  camState.tgt.copy(camGoal.tgt);
+  camera.position.copy(camState.pos);
+  camera.lookAt(camState.tgt);
+  renderer.render(scene, camera);
+
+  const src = renderer.domElement;
+  const cv = el("woshot"), g = cv.getContext("2d");
+  const v = v3(it.pos[0], it.pos[1], 1.2).project(camera);
+  const cx = (v.x * 0.5 + 0.5) * src.width;
+  const cy = (-v.y * 0.5 + 0.5) * src.height;
+  const w = Math.min(src.width, 620), h = w * (cv.height / cv.width);
+  g.fillStyle = "#111"; g.fillRect(0, 0, cv.width, cv.height);
+  try {
+    g.drawImage(src,
+      Math.max(0, Math.min(src.width - w, cx - w / 2)),
+      Math.max(0, Math.min(src.height - h, cy - h / 2)),
+      w, h, 0, 0, cv.width, cv.height);
+    // Crosshair on the spot itself.
+    g.strokeStyle = it.cost ? "#D0475E" : "#29A090";
+    g.lineWidth = 2;
+    g.beginPath();
+    g.arc(cv.width / 2, cv.height / 2, 17, 0, 7); g.stroke();
+  } catch (err) { /* tainted or unavailable: the panel still prints */ }
+
+  const rows = [
+    ["Location", `${it.room || "—"} · ${fmtPos(it)}`],
+    ["Constraint", it.clause || it.kind.replace(/_/g, " ")],
+    ["Finding", it.detail],
+    ["Recommended", VLABEL[it.verdict] || it.verdict],
+    ["Estimated cost", it.cost ? "$" + it.cost.toLocaleString() : "no cost"],
+    ["Floor returned", (it.recovered_m2 || 0) + " m²"],
+    ["Value", it.cost_per_m2 ? "$" + it.cost_per_m2 + " per m²" : "—"],
+    ["Excludes", (it.excludes || []).map(n => (P[n] && P[n].label) || n)
+      .join(", ") || "—"],
+    ["Funded", funded.has(it.id) ? "yes, within current budget" : "not yet"],
+    ["Source", it.source === "route"
+      ? "embodied reachability — a body stopped here"
+      : "geometric sweep — rule evaluated across the floor"],
+  ];
+  el("wobody").innerHTML = rows.map(([k, v]) =>
+    `<dt>${k}</dt><dd>${v}</dd>`).join("");
+  wo.hidden = false;
+  el("woprint").focus();
+}
+
+function workOrderText(it) {
+  return [`WORK ORDER  AT-${D.seed}-${
+    ISSUES.findIndex(q => q.id === it.id) + 1}`,
+    `Location:    ${it.room || "-"} (${fmtPos(it)})`,
+    `Constraint:  ${it.clause || it.kind}`,
+    `Finding:     ${it.detail}`,
+    `Action:      ${VLABEL[it.verdict] || it.verdict}`,
+    `Cost:        ${it.cost ? "$" + it.cost.toLocaleString() : "no cost"}`,
+    `Returns:     ${it.recovered_m2 || 0} m²`,
+    `Excludes:    ${(it.excludes || []).map(n => (P[n] && P[n].label) || n)
+      .join(", ") || "-"}`,
+    ``,
+    `Cost is an illustrative order-of-magnitude figure, not a quotation.`
+  ].join("\n");
+}
 
 stage.addEventListener("click", e => {
   if (inspecting) {
@@ -1204,6 +1291,53 @@ const PHASES = [
   { key: "capital", label: "Capital works", test: it => it.cost >= 2500 },
 ];
 
+/* The planner. A budget picks a verified row off the frontier, the
+   funded repairs light up in the list and in the plan, and the outcome
+   is the one measured by rebuilding the building with that set applied
+   -- not the sum of the parts, which the knapsack would have you
+   believe. */
+const FRONTIER = D.budget_frontier || [];
+let budgetIdx = FRONTIER.length ? Math.min(4, FRONTIER.length - 1) : -1;
+let funded = new Set();
+
+function applyBudget(i) {
+  if (!FRONTIER.length) return;
+  budgetIdx = Math.max(0, Math.min(FRONTIER.length - 1, i));
+  const row = FRONTIER[budgetIdx];
+  funded = new Set(row.picks);
+  el("budgetval").textContent = "$" + row.budget.toLocaleString();
+  const wc = row.by_profile.wheelchair || {};
+  const cn = row.by_profile.vision_impaired_cane || {};
+  const base = P.wheelchair ? P.wheelchair.pct : 0;
+  el("budgetout").innerHTML = row.picks.length
+    ? `Spend <b>$${row.spend.toLocaleString()}</b> on
+       ${row.picks.length} repair${row.picks.length > 1 ? "s" : ""} —
+       returns <b>${row.verified_m2} m²</b>, measured by rebuilding.
+       Wheelchair <b>${base}% → ${wc.pct}%</b> (${wc.goals}/5 destinations),
+       cane user <b>${cn.pct}%</b>.` +
+      (row.interaction_m2 < -0.5
+        ? ` <span style="color:var(--warn)">${Math.abs(row.interaction_m2)} m²
+           less than the parts predicted — the repairs overlap.</span>` : "")
+    : `Nothing on the menu is affordable at this budget.`;
+  // Repairs the planner refuses to buy at any budget, and why. Cheaper
+  // than several it does buy, which is the point worth making.
+  const excl = D.budget_excluded || [];
+  if (excl.length) {
+    el("budgetout").innerHTML +=
+      `<br><span style="color:var(--bad)">${excl.length} repair` +
+      `${excl.length > 1 ? "s" : ""} excluded at every budget:</span> ` +
+      excl.map(e => `$${e.cost.toLocaleString()} — ${e.why}`).join("; ") + ".";
+  }
+  renderIssueList();
+  // Light the funded repairs in the plan too.
+  isGroup.children.forEach(g => {
+    const it = ISSUES[g.userData.idx];
+    const on = it && funded.has(it.id);
+    g.userData.ring.material.color.set(on ? TOK.ok
+      : (VCOL()[it ? it.verdict : "build"] || TOK.bad));
+  });
+}
+
 function renderIssueList() {
   let shown = ISSUES.map((it, i) => ({ it, i })).filter(({ it }) =>
     isFilter === "all" ? true
@@ -1235,7 +1369,8 @@ function renderIssueList() {
       `destination in this building today.`;
   }
   const row = ({ it, i }) => `
-    <li><button data-i="${i}" class="${isSel === i ? "sel" : ""}">
+    <li><button data-i="${i}" class="${isSel === i ? "sel " : ""}${
+      funded.has(it.id) ? "buy" : ""}">
       <span class="r1">
         <em class="v-${it.verdict}">${VLABEL[it.verdict] || it.verdict}</em>
         <strong>${money(it.cost)}${
@@ -1285,7 +1420,7 @@ function selectIssue(i) {
     g.userData.ring.material.opacity = on ? 1 : 0.35;
     g.userData.post.material.opacity = on ? 0.8 : 0.18;
   });
-  showChokepoint({ ...it, verdict: it.verdict });
+  showChokepoint(it);       // the object itself: a copy breaks indexOf
   renderIssueList();
   syncNav();
 }
@@ -1456,14 +1591,14 @@ const SCENES = [
     }
   },
   {
-    id: "walker", dur: 11.0, kicker: "Walking adult", profile: "baseline_walking",
+    id: "walker", dur: 15.0, kicker: "Walking adult", profile: "baseline_walking",
     cap: `A walking adult reaches <em>every room in the building</em> —
           ${n0(P.baseline_walking.reach_m2, 0)} m², 100% of the floor.
           The community room, the gallery, the WC: all connected.
           This is the building as its drawings describe it.`,
     stat: () => ["100%", "of the floor reached"],
     walk: [["baseline_walking", "community_room", 0],
-           ["baseline_walking", "gallery", 6.0]],
+           ["baseline_walking", "gallery", 5.0]],
     enter() { hideAgents(); decalGroup.visible = false; },
     tick(t) {
       // Walls drop to knee height over the first two seconds, which the
@@ -1487,7 +1622,7 @@ const SCENES = [
     stat: () => [n0(P.wheelchair.pct, 1) + "%", "of the floor reached"],
     walk: [["wheelchair", "community_room", 0]],
     enter() { hideAgents(); decalGroup.visible = false; setWallCut(0.22); },
-    tick(t) { follow("wheelchair", t, 9, -5, 6); },
+    tick(t) { followOrPOV("wheelchair", t, 9, -5, 6); },
     onStop(pname, goal) {
       const j = journeyOf(pname, goal);
       (j.barriers || []).slice(0, 2).forEach((b, i) => {
@@ -1649,7 +1784,7 @@ const SCENES = [
     stat: () => ["1 950 mm", "headroom, needs 2 032"],
     walk: [["vision_impaired_cane", "restroom", 0]],
     enter() { hideAgents(); clearMarkers(); decalGroup.visible = false; setWallCut(0.22); },
-    tick(t) { follow("vision_impaired_cane", t, 7, -4, 4.5); },
+    tick(t) { followOrPOV("vision_impaired_cane", t, 7, -4, 4.5); },
     onStop(pname, goal) {
       (journeyOf(pname, goal).barriers || []).slice(0, 1).forEach(b => {
         addMarker(b.pos[0], b.pos[1], b.pos[2], `1 950 mm`,
@@ -1810,6 +1945,20 @@ function eyeLevel(pname, back) {
          s.p[0] + dx * 9, s.p[1] + dy * 9, s.p[2] + eye * 0.80);
 }
 
+/* When a body is stopped, drop to its own eye height for a beat before
+   pulling back. A 1:12 failure seen from above is a diagram; seen from
+   the seat it is a wall. The height is the profile's, not a constant. */
+const POV_HOLD = 2.6;
+function followOrPOV(pname, t, back, side, up) {
+  const p = P[pname], st = p._active;
+  if (st && st.done && !st.j.arrived) {
+    if (st.stoppedAt == null) st.stoppedAt = t;
+    const since = t - st.stoppedAt;
+    if (since < POV_HOLD) { eyeLevel(pname, 1.9); return; }
+  }
+  follow(pname, t, back, side, up);
+}
+
 /* Follow the agent that is currently walking, from behind and above. */
 function follow(pname, t, back, side, up) {
   back *= 0.62; side *= 0.62; up *= 0.72;
@@ -1835,7 +1984,8 @@ function resetWalks(sc) {
     const p = P[pname], j = p.journeys[goal];
     p._walks[goal] = {
       goal, delay: delay || 0, j, len: pathLength(j.path), s: 0,
-      done: false, drawn: false, sample: null, swapped: false
+      done: false, drawn: false, sample: null, swapped: false,
+      stoppedAt: null
     };
   });
 }
@@ -2104,6 +2254,8 @@ el("remedybtn").addEventListener("click", () => {
 });
 el("navnext").addEventListener("click", () => step(1));
 el("navprev").addEventListener("click", () => step(-1));
+el("budgetin").addEventListener("input", e =>
+  applyBudget(Number(e.target.value)));
 el("issort").addEventListener("click", () => {
   isSort = isSort === "roi" ? "phase" : "roi";
   el("issort").classList.toggle("on", isSort === "roi");
@@ -2138,6 +2290,15 @@ el("ispanel").querySelectorAll(".isfilters button").forEach(b =>
     renderIssueList();
   }));
 el("cpclose").addEventListener("click", hideChokepoint);
+el("woclose").addEventListener("click", () => { el("wo").hidden = true; });
+el("woprint").addEventListener("click", () => window.print());
+el("wocopy").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(workOrderText(cpOpen));
+    el("wocopy").textContent = "Copied";
+    setTimeout(() => { el("wocopy").textContent = "Copy as text"; }, 1600);
+  } catch (err) { el("wocopy").textContent = "Press ⌘C"; }
+});
 el("widthslider").addEventListener("input", e => {
   sliderTouched = true;
   applyWidth(Number(e.target.value));
@@ -2149,7 +2310,11 @@ addEventListener("keydown", e => {
   if (e.key === "ArrowRight") { e.preventDefault(); goto(sceneI + 1); }
   if (e.key === "ArrowLeft") { e.preventDefault(); goto(sceneI - 1); }
   if (e.key.toLowerCase() === "p") { el("play").click(); }
-  if (e.key === "Escape") { hideChokepoint(); if (inspecting) setInspect(false); }
+  if (e.key === "Escape") {
+    if (!el("wo").hidden) { el("wo").hidden = true; return; }
+    hideChokepoint();
+    if (inspecting) setInspect(false);
+  }
   if (e.key.toLowerCase() === "i") { e.preventDefault(); setInspect(!inspecting); }
   if (inspecting) {
     // Step the worklist from the keyboard: useful when presenting, and
