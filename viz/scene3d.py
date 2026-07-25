@@ -25,7 +25,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "core"))
 
 from schema import ALL_PROFILES, BASELINE, WHEELCHAIR, IN_PER_M
-from world3d import build3d
+from world3d import build3d, SURFACE_ORDER
 from navgrid import NavGrid
 from pathing import GeoField
 from sweep import sweep, group
@@ -145,9 +145,10 @@ def main():
     args = ap.parse_args()
 
     w = build3d(args.seed)
-    free, floor_z, ceil_z = w.rasterize()
+    free, floor_z, ceil_z, surf = w.rasterize()
     cell = w.cell
-    grid = NavGrid(free, floor_z, cell, ceiling=ceil_z)
+    grid = NavGrid(free, floor_z, cell, ceiling=ceil_z,
+                   surface=surf, surface_order=SURFACE_ORDER)
     spawn, goals = w.spawn, w.goals
 
     base = grid.analyse(BASELINE, spawn)
@@ -210,9 +211,11 @@ def main():
                                 pop=A.sample_population(args.pop, args.seed))
     det = A.detour(grid, spawn, goals)
     opt = A.optimise(free, floor_z, cell, spawn, goals, budget=args.budget,
-                     seed=args.seed, pop_n=args.pop, ceiling=ceil_z)
+                     seed=args.seed, pop_n=args.pop, ceiling=ceil_z,
+                     surface=surf, surface_order=SURFACE_ORDER)
     fixed_free, fixed_height = opt.pop("_final_world")
-    after = NavGrid(fixed_free, fixed_height, cell, ceiling=ceil_z)
+    after = NavGrid(fixed_free, fixed_height, cell, ceiling=ceil_z,
+                    surface=surf, surface_order=SURFACE_ORDER)
     after_base = after.analyse(BASELINE, spawn)["reachable_m2"] or 1.0
     for pr in profiles:
         p = next(q for q in ALL_PROFILES if q.name == pr["name"])
@@ -240,6 +243,7 @@ def main():
         "recall": recall,
         "width_sweep": sweepw,
         "counterfactual": cf,
+        "surface_grid": encode_surface(surf),
         "chokepoints": chokepoints(w, grid, spawn, cell, profiles, opt,
                                    seed=args.seed),
     })
@@ -263,10 +267,12 @@ def counterfactual(seed, spawn, cell):
     """
     a = build3d(seed)
     b = build3d(seed, with_contents=False)
-    fa, za, ca = a.rasterize()
-    fb, zb, cb = b.rasterize()
-    ga = NavGrid(fa, za, cell, ceiling=ca)
-    gb = NavGrid(fb, zb, cell, ceiling=cb)
+    fa, za, ca, sa = a.rasterize()
+    fb, zb, cb, sb = b.rasterize()
+    ga = NavGrid(fa, za, cell, ceiling=ca, surface=sa,
+                 surface_order=SURFACE_ORDER)
+    gb = NavGrid(fb, zb, cell, ceiling=cb, surface=sb,
+                 surface_order=SURFACE_ORDER)
     # Both worlds are measured against the SAME denominator -- the floor
     # a walking adult reaches once the contents are out of the way.
     # Normalising each world to its own baseline made the walking adult
@@ -310,10 +316,12 @@ def furniture_blockages(seed, spawn, cell, min_m2=1.2, top=8):
     """
     a = build3d(seed)
     b = build3d(seed, with_contents=False)
-    fa, za, ca = a.rasterize()
-    fb, zb, cb = b.rasterize()
-    ga = NavGrid(fa, za, cell, ceiling=ca)
-    gb = NavGrid(fb, zb, cell, ceiling=cb)
+    fa, za, ca, sa = a.rasterize()
+    fb, zb, cb, sb = b.rasterize()
+    ga = NavGrid(fa, za, cell, ceiling=ca, surface=sa,
+                 surface_order=SURFACE_ORDER)
+    gb = NavGrid(fb, zb, cell, ceiling=cb, surface=sb,
+                 surface_order=SURFACE_ORDER)
 
     gained = np.zeros(fa.shape, dtype=bool)
     per = {}
@@ -486,6 +494,19 @@ def nearest_room(w, x, y):
         if r["x0"] <= x <= r["x1"] and r["y0"] <= y <= r["y1"]:
             return r["name"]
     return ""
+
+
+def encode_surface(surf):
+    """Quarter-resolution surface raster for the floor-material overlay.
+
+    Full res would be 630 kB of base64 for something the eye reads as
+    broad zones; at a 20 cm cell it is 40 kB and looks identical.
+    """
+    import base64
+    q = surf[::4, ::4]
+    return {"nx": int(q.shape[0]), "ny": int(q.shape[1]),
+            "cell": 0.2,
+            "data": base64.b64encode(q.tobytes()).decode("ascii")}
 
 
 def encode_mask(m):
