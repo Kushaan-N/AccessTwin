@@ -154,6 +154,41 @@
 .nogl h3{margin:0;font-size:15px}
 .nogl p{margin:0;font-size:13px;color:var(--ink-2);max-width:44ch}
 
+button.prim{border-color:var(--accent);color:var(--accent)}
+button.prim[aria-pressed="true"]{background:var(--accent);
+  color:var(--stage-bg);border-color:var(--accent)}
+
+.ispanel{position:absolute;right:0;top:0;bottom:0;width:340px;z-index:7;
+  background:var(--sheet);border-left:1px solid var(--rule);
+  display:flex;flex-direction:column}
+.ispanel[hidden]{display:none}
+.ishead{padding:12px 14px 10px;border-bottom:1px solid var(--rule);
+  display:flex;flex-direction:column;gap:9px}
+.ishead b{font-family:var(--mono);font-size:19px;display:block;
+  font-variant-numeric:tabular-nums}
+.ishead span{font-size:12px;color:var(--ink-2)}
+.isfilters{display:flex;gap:5px}
+.isfilters button{padding:3px 8px;font-size:10.5px}
+.isfilters button.on{border-color:var(--accent);color:var(--accent)}
+.islist{list-style:none;margin:0;padding:0;overflow-y:auto;flex:1}
+.islist li{border-bottom:1px solid var(--rule-soft)}
+.islist button{width:100%;text-align:left;background:none;border:0;
+  border-left:3px solid transparent;border-radius:0;padding:9px 13px;
+  cursor:pointer;font-family:var(--sans);font-size:12.5px;color:var(--ink)}
+.islist button:hover{background:var(--panel)}
+.islist button.sel{background:var(--panel);border-left-color:var(--accent)}
+.islist .r1{display:flex;justify-content:space-between;gap:10px;
+  align-items:baseline}
+.islist .r1 em{font-style:normal;font-family:var(--mono);font-size:11px;
+  letter-spacing:.06em;text-transform:uppercase}
+.islist .r1 strong{font-family:var(--mono);font-size:12px;
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+.islist .r2{color:var(--ink-2);margin-top:3px;line-height:1.35}
+.islist .r3{color:var(--ink-3);font-size:11px;margin-top:3px}
+.v-move{color:var(--ok)} .v-reconfigure{color:var(--warn)}
+.v-build{color:var(--bad)} .v-combined{color:var(--bad)}
+@media(max-width:900px){.ispanel{width:100%}}
+
 .cpsum{position:absolute;left:12px;top:12px;display:flex;gap:8px;
   flex-wrap:wrap;pointer-events:none;z-index:4}
 .cpsum b{font-family:var(--mono);font-size:11.5px;font-weight:600;
@@ -230,6 +265,21 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--panel);
       <div id="stage" tabindex="0" role="application"
            aria-label="3D walkthrough. Use left and right arrow keys to change scene, or read the text findings below."></div>
       <div id="cpsum" class="cpsum" hidden></div>
+      <div id="ispanel" class="ispanel" hidden>
+        <div class="ishead">
+          <div>
+            <b id="istotal"></b>
+            <span id="issub"></span>
+          </div>
+          <div class="isfilters" role="group" aria-label="Filter issues">
+            <button data-f="all" class="on">All</button>
+            <button data-f="move">Free</button>
+            <button data-f="build">Build</button>
+            <button data-f="combined">Combined</button>
+          </div>
+        </div>
+        <ul id="islist" class="islist"></ul>
+      </div>
       <div id="cppop" class="cppop" hidden role="dialog"
            aria-labelledby="cptitle" tabindex="-1">
         <button id="cpclose" class="cpx" aria-label="Close">&times;</button>
@@ -288,6 +338,7 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--panel);
   </details>
 
   <footer class="foot">
+    <button id="inspect" class="prim">Inspect issues</button>
     <button id="play">Pause</button>
     <button id="restart">Restart</button>
     <button id="prev">&larr;</button>
