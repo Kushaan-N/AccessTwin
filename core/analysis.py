@@ -33,6 +33,12 @@ COST_REGRADE_PER_IN = 140.0
 COST_RAMP_PER_M2 = 220.0
 COST_DECLUTTER = 150.0        # relocate a furniture obstruction
 
+# ADA 405.2 caps ramps at 1:12. Building to exactly the cap is a trap:
+# discretised on a 5 cm grid the running slope lands a hair over, and the
+# wheelchair the ramp exists for is excluded by its own remediation. Real
+# practice leaves margin, so remediation targets 1:14.
+RAMP_RUN_RATIO = 14.0
+
 
 # ======================================================================
 # breaking point + chokepoint localisation
@@ -498,12 +504,12 @@ def propose_fixes(grid: NavGrid, free, height, cell, spawn, goals,
 
         elif b["kind"] == "step_height":
             step_in = max(b["step_in"], 0.5)
-            run_m = (step_in / IN_PER_M) * 12.0     # 1:12 compliant transition
+            run_m = (step_in / IN_PER_M) * RAMP_RUN_RATIO
             cands.append({
                 "id": f"level@{pos[0]:.1f},{pos[1]:.1f}",
                 "kind": "level_change", "cell": list(yx), "pos": pos,
-                "detail": f"ramp {step_in:.1f}in level change at 1:12 "
-                          f"({run_m:.1f}m run)",
+                "detail": f"ramp {step_in:.1f}in level change at "
+                          f"1:{RAMP_RUN_RATIO:.0f} ({run_m:.1f}m run)",
                 "cost": round(COST_REGRADE_BASE +
                               COST_REGRADE_PER_IN * step_in),
                 "_apply": ("regrade", yx, int(round(run_m / cell))),
@@ -516,10 +522,10 @@ def propose_fixes(grid: NavGrid, free, height, cell, spawn, goals,
                 "id": f"regrade@{pos[0]:.1f},{pos[1]:.1f}",
                 "kind": "regrade_ramp", "cell": list(yx), "pos": pos,
                 "detail": f"regrade {area:.0f}m2 run from 1:{1/grade:.0f} "
-                          f"to 1:12",
+                          f"to 1:{RAMP_RUN_RATIO:.0f}",
                 "cost": round(COST_RAMP_PER_M2 * area),
                 "_apply": ("regrade", yx,
-                           int(round(np.sqrt(area) / cell * 1.6))),
+                           int(round(grade * np.sqrt(area) * RAMP_RUN_RATIO / cell))),
             })
     return cands
 
@@ -531,11 +537,44 @@ def apply_fix(free, height, cell, fix):
     if kind == "free_disk":
         f2[_disk(free.shape, yx, r)] = True
     elif kind == "regrade":
-        d = _disk(free.shape, yx, max(r, 3))
-        # Spreading the rise over the run IS the regrade: a smoothed
-        # height field has the same endpoints and a gentler gradient.
-        sm = ndimage.gaussian_filter(h2, sigma=max(r, 3) / 2.5)
-        h2 = np.where(d, sm, h2)
+        # Build an actual ramp, not a blur.
+        #
+        # Smoothing the height field was a tempting shortcut and a wrong
+        # one: at the run lengths a 600 mm rise needs (7.2 m at 1:12) the
+        # kernel smears the raised slab across everything near it,
+        # destroying floor area elsewhere. The optimiser then scored that
+        # destruction as an improvement, because more of the population
+        # could reach the goal even though the building had been wrecked.
+        #
+        # A regrade lays a linear surface from the low level to the high
+        # level along the local direction of ascent, over exactly the run
+        # the code requires -- which is what a builder would pour.
+        run_cells = max(int(r), 4)
+        run_m = run_cells * cell
+        region = _disk(free.shape, yx, int(run_cells / 2) + int(1.5 / cell))
+        if not region.any():
+            return f2, h2
+        vals = h2[region]
+        zlo, zhi = float(np.percentile(vals, 4)), float(np.percentile(vals, 96))
+        if zhi - zlo < 0.02:
+            return f2, h2
+
+        # Direction of steepest ascent, from a smoothed copy so a single
+        # noisy cell cannot set the ramp's orientation.
+        sm = ndimage.gaussian_filter(h2, sigma=max(3.0, 0.25 / cell))
+        gy, gx = np.gradient(sm, cell)
+        uy, ux = float(gy[yx]), float(gx[yx])
+        n = float(np.hypot(uy, ux))
+        if n < 1e-6:
+            return f2, h2
+        uy, ux = uy / n, ux / n
+
+        ys, xs = np.nonzero(region)
+        # Distance along the ascent direction, in metres, centred on the
+        # discontinuity so the ramp straddles it.
+        t = ((ys - yx[0]) * uy + (xs - yx[1]) * ux) * cell
+        z = zlo + np.clip((t + run_m / 2) / run_m, 0.0, 1.0) * (zhi - zlo)
+        h2[ys, xs] = z.astype(h2.dtype)
     return f2, h2
 
 
@@ -549,8 +588,16 @@ def _score(free, height, cell, spawn, goals, pop, ceiling=None) -> dict:
         if all(g.reaches(p, spawn, gl) for gl in goals.values()):
             ok += 1
     n = max(len(pop), 1)
+    named = {}
+    for p in ALL_PROFILES:
+        st = g.analyse(p, spawn, min_island_cells=10 ** 9)
+        named[p.name] = {
+            "pct": round(100.0 * st["reachable_m2"] / base, 1),
+            "goals": sum(1 for gl in goals.values()
+                         if g.reaches(p, spawn, gl))}
     return {"pct_full_access": round(100.0 * ok / n, 1),
-            "mean_area_fraction": round(frac / n, 3)}
+            "mean_area_fraction": round(frac / n, 3),
+            "by_profile": named}
 
 
 def optimise(free, height, cell, spawn, goals, budget: float = 5000.0,
@@ -576,6 +623,7 @@ def optimise(free, height, cell, spawn, goals, budget: float = 5000.0,
     chosen, spent, log = [], 0.0, []
     remaining = list(cands)
     standalone = None      # every candidate measured against the as-built
+    harmed = {}            # id -> who this fix would cost, if anyone
     skipped_cost = []
 
     while remaining:
@@ -606,8 +654,29 @@ def optimise(free, height, cell, spawn, goals, budget: float = 5000.0,
         # Keep only fixes that actually move the needle, then rank by
         # population unlocked per dollar. Area gain breaks ties so a fix
         # that opens floor without flipping a goal still counts.
+        # Reject anything that costs an existing profile reachable floor
+        # or a goal it already had. An aggregate score can be improved by
+        # a change that strands somebody; that is not a fix.
+        def harm(t):
+            """Name what this fix would cost somebody, or None."""
+            a, b = cur.get("by_profile", {}), t["s"].get("by_profile", {})
+            for name, before in a.items():
+                after = b.get(name, before)
+                if after["goals"] < before["goals"]:
+                    return (f"{name} loses access to "
+                            f"{before['goals'] - after['goals']} destination(s)")
+                if after["pct"] < before["pct"] - 1.0:
+                    return (f"{name} loses {before['pct'] - after['pct']:.0f} "
+                            f"points of reachable floor")
+            return None
+
+        for t in scored:
+            h = harm(t)
+            if h:
+                harmed.setdefault(t["fx"]["id"], h)
+
         useful = [t for t in scored
-                  if t["gain"] > 0 or t["area_gain"] > 0.002]
+                  if (t["gain"] > 0 or t["area_gain"] > 0.002) and not harm(t)]
         if not useful:
             break
         useful.sort(key=lambda t: -((t["gain"] + 12.0 * t["area_gain"]) /
@@ -626,7 +695,8 @@ def optimise(free, height, cell, spawn, goals, budget: float = 5000.0,
         })
         remaining = [r for r in remaining if r["id"] != fx["id"]]
 
-    rejected = [d for d in (standalone or []) if d["id"] not in chosen]
+    rejected = [dict(d, harm=harmed.get(d["id"]))
+                for d in (standalone or []) if d["id"] not in chosen]
     return {
         "budget_usd": budget,
         "spent_usd": round(spent),
