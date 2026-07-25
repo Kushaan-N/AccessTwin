@@ -213,6 +213,14 @@ def main():
     opt = A.optimise(free, floor_z, cell, spawn, goals, budget=args.budget,
                      seed=args.seed, pop_n=args.pop, ceiling=ceil_z,
                      surface=surf, surface_order=SURFACE_ORDER)
+    print("  budget frontier...")
+    frontier = A.budget_frontier(
+        free, floor_z, cell, spawn, goals,
+        budgets=[1000, 2500, 5000, 7500, 10000, 15000, 20000, 30000,
+                 50000, 80000],
+        seed=args.seed, pop_n=60, ceiling=ceil_z,
+        surface=surf, surface_order=SURFACE_ORDER)
+
     fixed_free, fixed_height = opt.pop("_final_world")
     fixed_free = np.asarray(fixed_free)
     after = NavGrid(fixed_free, fixed_height, cell, ceiling=ceil_z,
@@ -251,6 +259,8 @@ def main():
         "elasticity": A.elasticity(pop["width_curve"]),
         "detour": det,
         "remediation": opt,
+        "budget_frontier": frontier["rows"],
+        "budget_excluded": frontier["excluded_as_harmful"],
         "recall": recall,
         "width_sweep": sweepw,
         "counterfactual": cf,
@@ -612,6 +622,21 @@ def audit_issues(w, grid, free, cell, chokes, profiles, opt, seed=7,
         it["recovered_m2"] = round(m2, 1)
         it["cost_per_m2"] = (round(it["cost"] / m2) if it["cost"] and m2 > 0.2
                              else (0 if not it["cost"] else None))
+
+    from schema import ADA_CITATIONS, ViolationType
+    CLAUSE = {v.value: ADA_CITATIONS[v] for v in ViolationType
+              if v in ADA_CITATIONS}
+    # Route-derived issues carry the kind of REPAIR, not the kind of
+    # violation, so the clause has to be mapped back or the ticket cites
+    # "widen aperture" where it should cite ADA 404.2.3.
+    FIXKIND = {"widen_aperture": "clearance_width",
+               "declutter": "clearance_width",
+               "reconfigure": "clearance_width",
+               "level_change": "step_height",
+               "regrade_ramp": "slope_gradient"}
+    for it in issues:
+        k = it.get("kind")
+        it["clause"] = CLAUSE.get(k) or CLAUSE.get(FIXKIND.get(k, ""), "")
 
     order = {"move": 0, "reconfigure": 1, "combined": 2, "build": 3}
     issues.sort(key=lambda d: (order.get(d["verdict"], 9),
