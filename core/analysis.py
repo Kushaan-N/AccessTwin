@@ -578,8 +578,10 @@ def apply_fix(free, height, cell, fix):
     return f2, h2
 
 
-def _score(free, height, cell, spawn, goals, pop, ceiling=None) -> dict:
-    g = NavGrid(free, height, cell, ceiling=ceiling)
+def _score(free, height, cell, spawn, goals, pop, ceiling=None,
+           surface=None, surface_order=None) -> dict:
+    g = NavGrid(free, height, cell, ceiling=ceiling, surface=surface,
+                surface_order=surface_order)
     base = g.analyse(BASELINE, spawn)["reachable_m2"] or 1.0
     ok, frac = 0, 0.0
     for p, _label in pop:
@@ -603,7 +605,9 @@ def _score(free, height, cell, spawn, goals, pop, ceiling=None) -> dict:
 def optimise(free, height, cell, spawn, goals, budget: float = 5000.0,
              seed: int = 7, pop_n: int = 90,
              furniture: np.ndarray | None = None,
-             ceiling: np.ndarray | None = None) -> dict:
+             ceiling: np.ndarray | None = None,
+             surface: np.ndarray | None = None,
+             surface_order: list | None = None) -> dict:
     """Greedy budget-constrained remediation.
 
     Every candidate is scored by REBUILDING the world with that fix
@@ -613,10 +617,12 @@ def optimise(free, height, cell, spawn, goals, budget: float = 5000.0,
     same route are not additive).
     """
     pop = sample_population(n=pop_n, seed=seed)
-    grid = NavGrid(free, height, cell, ceiling=ceiling)
+    grid = NavGrid(free, height, cell, ceiling=ceiling,
+                   surface=surface, surface_order=surface_order)
     cands = propose_fixes(grid, free, height, cell, spawn, goals,
                           furniture=furniture)
-    start = _score(free, height, cell, spawn, goals, pop, ceiling)
+    start = _score(free, height, cell, spawn, goals, pop, ceiling,
+                   surface, surface_order)
 
     cur_f, cur_h = free.copy(), height.copy()
     cur = dict(start)
@@ -633,7 +639,8 @@ def optimise(free, height, cell, spawn, goals, budget: float = 5000.0,
                 skipped_cost.append(fx["id"])
                 continue
             f2, h2 = apply_fix(cur_f, cur_h, cell, fx)
-            s = _score(f2, h2, cell, spawn, goals, pop, ceiling)
+            s = _score(f2, h2, cell, spawn, goals, pop, ceiling,
+                       surface, surface_order)
             gain = s["pct_full_access"] - cur["pct_full_access"]
             area_gain = s["mean_area_fraction"] - cur["mean_area_fraction"]
             scored.append({"gain": gain, "area_gain": area_gain, "fx": fx,
