@@ -252,6 +252,90 @@ function makeFurniture(THREE, s, M) {
       cyl(THREE, S, 0.018, 0.018, 0.16, 0, h + 0.06, -d / 2 + 0.07, g, 10);
       return g;
     }
+    case "seat": {                                            // fixed seat
+      const sh = 0.44;
+      box(THREE, F, w * 0.92, 0.10, d * 0.78, 0, sh, 0.02, g);   // pan
+      box(THREE, F, w * 0.92, h - sh - 0.10, 0.09, 0,
+          sh + (h - sh) / 2, -d / 2 + 0.05, g);                  // back
+      [-(w / 2 - 0.03), w / 2 - 0.03].forEach(a =>
+        box(THREE, M.timber, 0.06, 0.20, d * 0.7, a, sh + 0.02, 0.02, g));
+      cyl(THREE, S, 0.03, 0.03, sh, 0, sh / 2, 0.02, g, 10);
+      return g;
+    }
+    case "bookshelf": {
+      box(THREE, T, w, h, d, 0, h / 2, 0, g);                    // carcass
+      const shelves = Math.max(3, Math.round(h / 0.34));
+      for (let i = 1; i < shelves; i++) {
+        // Books as a slightly proud band per shelf: at demo distance a
+        // flat face reads as a cupboard, a banded one reads as a library.
+        const b = box(THREE, i % 2 ? M.fabric : M.concrete,
+                      w * 0.9, 0.24, 0.05, 0, i * (h / shelves) + 0.12,
+                      d / 2 + 0.005, g);
+        b.castShadow = false;
+      }
+      return g;
+    }
+    case "cafe_counter":
+    case "ticket_desk": {
+      box(THREE, T, w, h - 0.05, d * 0.9, 0, (h - 0.05) / 2, 0, g);
+      box(THREE, M.concrete, w + 0.08, 0.05, d + 0.06, 0, h - 0.025, 0, g);
+      for (let i = 1; i < Math.round(d / 1.2); i++) {
+        box(THREE, S, w + 0.09, 0.02, 0.02, 0, h - 0.30,
+            -d / 2 + i * 1.2, g);
+      }
+      return g;
+    }
+    case "stool": {
+      cyl(THREE, T, w / 2, w / 2, 0.05, 0, h - 0.025, 0, g, 18);
+      cyl(THREE, S, 0.028, 0.028, h - 0.05, 0, (h - 0.05) / 2, 0, g, 10);
+      cyl(THREE, S, w * 0.42, w * 0.46, 0.025, 0, 0.012, 0, g, 18);
+      return g;
+    }
+    case "planter": {
+      cyl(THREE, M.concrete, w / 2, w / 2 * 0.82, h * 0.66,
+          0, h * 0.33, 0, g, 20);
+      const foliage = new THREE.Mesh(
+        new THREE.SphereGeometry(w * 0.46, 14, 10),
+        new THREE.MeshStandardMaterial({ color: 0x4d6b46, roughness: 0.95 }));
+      foliage.scale.set(1, 0.85, 1);
+      foliage.position.y = h * 0.66 + w * 0.34;
+      foliage.castShadow = foliage.receiveShadow = true;
+      g.add(foliage);
+      return g;
+    }
+    case "stage": {
+      box(THREE, T, w, h, d, 0, h / 2, 0, g);
+      box(THREE, M.concrete, w + 0.06, 0.04, d + 0.06, 0, h - 0.02, 0, g);
+      return g;
+    }
+    case "display_panel": {
+      box(THREE, M.concrete, w, h - 0.06, d, 0, (h - 0.06) / 2 + 0.06, 0, g);
+      box(THREE, S, w * 0.35, 0.06, d + 0.04, 0, 0.03, 0, g);
+      return g;
+    }
+    case "display_case": {
+      box(THREE, T, w, h * 0.55, d, 0, h * 0.275, 0, g);
+      const glass = new THREE.Mesh(
+        new THREE.BoxGeometry(w * 0.96, h * 0.44, d * 0.96),
+        new THREE.MeshStandardMaterial({
+          color: 0xbcd6e0, roughness: 0.08, metalness: 0.1,
+          transparent: true, opacity: 0.28 }));
+      glass.position.y = h * 0.55 + h * 0.22;
+      g.add(glass);
+      return g;
+    }
+    case "reading_table":
+    case "low_table": {
+      box(THREE, T, w, 0.05, d, 0, h - 0.025, 0, g);
+      const lx = w / 2 - 0.09, lz = d / 2 - 0.09;
+      [[-lx, -lz], [lx, -lz], [-lx, lz], [lx, lz]].forEach(([a, b]) =>
+        cyl(THREE, S, 0.022, 0.022, h - 0.05, a, (h - 0.05) / 2, b, g, 10));
+      return g;
+    }
+    case "lift_panel": {
+      box(THREE, S, w, h, d, 0, h / 2, 0, g);
+      return g;
+    }
     default:
       return null;
   }
