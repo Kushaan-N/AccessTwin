@@ -359,69 +359,12 @@ def elasticity(curve: list) -> dict:
 # counterfactual: architecture vs contents
 # ======================================================================
 
-def furniture_mask(seed: int) -> np.ndarray:
-    """Cells obstructed by contents rather than by the building.
+# The architecture-vs-contents counterfactual used to live here and
+# depended on the 2.5D generator. The 3D pipeline computes it directly in
+# viz/scene3d.py by regenerating the building with its furniture omitted,
+# which is exact rather than inferred, so both functions were removed
+# along with this module's last dependency on worldgen.
 
-    Exact, not inferred: the generator replays the same construction
-    with the clutter loop skipped, so differencing the two free masks
-    is ground truth. An earlier version guessed at this by taking
-    obstructions not connected to the shell, which quietly reclassified
-    the side room's isolated wall pier -- the strip between its two
-    entrances -- as a chair, and produced a headline that was wrong.
-    """
-    import worldgen
-    f, _h, _c, _s, _g, _gt = worldgen.build(seed)
-    fe, _h2, _c2, _s2, _g2, _gt2 = worldgen.build_empty(seed)
-    return fe & ~f
-
-
-def counterfactual_furniture(seed: int, spawn, goals: dict) -> dict:
-    """Re-generate the same building with the contents removed.
-
-    Splits every exclusion into two buckets: caused by the building,
-    and caused by what somebody put in it. The second bucket is
-    dramatically cheaper to fix, and no clipboard audit distinguishes
-    them, because it measures the room as it stands.
-    """
-    import worldgen
-    f, h, cell, _sp, _gl, _gt = worldgen.build(seed)
-    fe, he, _c, _s, _g, _t = worldgen.build_empty(seed)
-    g_full = NavGrid(f, h, cell)
-    g_arch = NavGrid(fe, he, cell)
-    base_full = g_full.analyse(BASELINE, spawn)["reachable_m2"] or 1.0
-    base_arch = g_arch.analyse(BASELINE, spawn)["reachable_m2"] or 1.0
-
-    out = {"profiles": {},
-           "furniture_area_m2": round(float((fe & ~f).sum()) * cell ** 2, 1)}
-    for p in ALL_PROFILES:
-        a = g_full.analyse(p, spawn)
-        b = g_arch.analyse(p, spawn)
-        gab = {k: bool(g_full.reaches(p, spawn, g)) for k, g in goals.items()}
-        gem = {k: bool(g_arch.reaches(p, spawn, g)) for k, g in goals.items()}
-        out["profiles"][p.name] = {
-            "as_built_pct": round(100 * a["reachable_m2"] / base_full, 1),
-            "furniture_removed_pct": round(100 * b["reachable_m2"] /
-                                           base_arch, 1),
-            "recovered_pct": round(100 * (b["reachable_m2"] / base_arch -
-                                          a["reachable_m2"] / base_full), 1),
-            "goals_as_built": gab, "goals_empty": gem,
-            "goals_unblocked_by_decluttering": [k for k in goals
-                                                if gem[k] and not gab[k]],
-        }
-    out["unblocked_by_moving_furniture"] = [
-        n for n, d in out["profiles"].items()
-        if not all(d["goals_as_built"].values())
-        and all(d["goals_empty"].values())]
-    out["note"] = ("Exclusions that disappear when the contents are removed "
-                   "are caused by furniture placement, not by the building. "
-                   "Furniture footprint is exact, from a re-generation of "
-                   "the same building without contents.")
-    return out
-
-
-# ======================================================================
-# remediation optimiser
-# ======================================================================
 
 def _disk(shape, yx, r_cells):
     ys, xs = np.ogrid[:shape[0], :shape[1]]
