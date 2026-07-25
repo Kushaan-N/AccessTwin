@@ -652,8 +652,10 @@ D.profiles.forEach(p => P[p.name] = p);
 const REC = D.recall, OPT = D.remediation, POP = D.population;
 const BPs = D.breaking_point.community_room || Object.values(D.breaking_point)[0];
 const chosen = OPT.chosen[0];
-const rejected = (OPT.rejected || []).filter(r => chosen && r.cost > chosen.cost)
-  .sort((a, b) => b.cost - a.cost)[0];
+// The interesting rejection is not the dearest one, it is the one that
+// scored BEST per dollar and was still turned down.
+const rejected = (OPT.rejected || []).filter(r => r.harm)
+  .sort((a, b) => b.pct_per_1k_usd - a.pct_per_1k_usd)[0];
 const n0 = (v, d) => Number(v).toFixed(d == null ? 0 : d);
 
 function journeyOf(pname, goal) { return P[pname].journeys[goal]; }
@@ -829,24 +831,29 @@ const SCENES = [
     id: "fix", dur: 12.0, kicker: "Cheapest repair",
     cap: chosen ? `Every candidate repair is scored by <em>rebuilding the
           building and re-running the whole population through it</em>. With
-          $${OPT.budget_usd.toLocaleString()}, the optimum is
+          $${OPT.budget_usd.toLocaleString()} the optimum is
           <em>$${chosen.cost.toLocaleString()}</em> — ${chosen.detail} —
-          taking population access from ${OPT.before.pct_full_access}% to
-          <em>${OPT.after.pct_full_access}%</em>.${rejected ?
-          ` The obvious fix at $${rejected.cost.toLocaleString()} was measured
-          and rejected.` : ""}`
+          returning the community room to the wheelchair
+          (<em>${P.wheelchair.pct}% → ${P.wheelchair.after_pct}%</em> of the
+          floor) and the cane user
+          (${P.vision_impaired_cane.pct}% → ${P.vision_impaired_cane.after_pct}%).`
+          + (rejected ? ` A cheaper repair scored
+          <em>${n0(rejected.pct_per_1k_usd, 1)} points per $1k against
+          ${n0(chosen.pct_per_1k_usd, 1)}</em> and was still rejected:
+          rebuilt that way, ${rejected.harm}.` : "")
       : "No single repair improved measured population coverage.",
     stat: () => chosen
-      ? ["+" + n0(OPT.coverage_gain_pct, 1) + " pts", "for $" + OPT.spent_usd.toLocaleString()]
+      ? ["+" + n0(P.wheelchair.after_pct - P.wheelchair.pct, 1) + " pts",
+         "floor returned to the wheelchair, for $" + OPT.spent_usd.toLocaleString()]
       : ["—", ""],
     enter() {
       hideAgents(); clearMarkers();
       decalGroup.visible = true; paintDecal("heat", null, false);
       OPT.chosen.forEach(f => addMarker(f.pos[0], f.pos[1], 0,
         "$" + f.cost.toLocaleString(), f.detail, TOK.ok));
-      (OPT.rejected || []).slice(0, 3).forEach(f => addMarker(
-        f.pos[0], f.pos[1], 0, "$" + f.cost.toLocaleString(),
-        "rejected — " + n0(f.pct_per_1k_usd, 1) + " pts/$1k", TOK.warn));
+      (OPT.rejected || []).filter(f => f.harm).slice(0, 2).forEach(f =>
+        addMarker(f.pos[0], f.pos[1], 0, "$" + f.cost.toLocaleString(),
+                  "rejected — " + f.harm, TOK.bad));
       lookAt(BW / 2, -8, 30, BW / 2, BH / 2, 0);
     },
     tick(t) {
