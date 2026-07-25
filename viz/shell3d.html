@@ -216,6 +216,27 @@ button.prim[aria-pressed="true"]{background:var(--accent);
 .v-build{color:var(--bad)} .v-combined{color:var(--bad)}
 @media(max-width:900px){.ispanel{width:100%}}
 
+/* A visible way forward. Somebody in a hurry should not have to find a
+   12px arrow in the footer or guess that the keyboard does anything. */
+.nav{position:absolute;top:50%;transform:translateY(-50%);z-index:5;
+  width:44px;height:76px;padding:0;display:flex;align-items:center;
+  justify-content:center;gap:6px;border-radius:4px;
+  background:color-mix(in srgb, var(--sheet) 72%, transparent);
+  border:1px solid var(--rule);color:var(--ink-2);
+  transition:opacity .18s ease, color .18s ease, width .18s ease;
+  opacity:.5;cursor:pointer}
+.nav span{font-size:26px;line-height:1;font-family:var(--sans)}
+.nav b{font-family:var(--mono);font-size:10px;letter-spacing:.08em;
+  text-transform:uppercase;white-space:nowrap;display:none}
+.nav:hover,.nav:focus-visible{opacity:1;color:var(--accent);
+  border-color:var(--accent)}
+.nav.next:hover{width:auto;padding:0 14px 0 10px}
+.nav.next:hover b{display:inline}
+.nav.prev{left:10px}
+.nav.next{right:10px}
+.ispanel:not([hidden]) ~ .nav.next{right:352px}
+@media (prefers-reduced-motion: reduce){.nav{transition:none}}
+
 .cpsum{position:absolute;left:12px;top:12px;display:flex;gap:8px;
   flex-wrap:wrap;pointer-events:none;z-index:4}
 .cpsum b{font-family:var(--mono);font-size:11.5px;font-weight:600;
@@ -308,6 +329,10 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--panel);
       </div>
       <div id="stage" tabindex="0" role="application"
            aria-label="3D walkthrough. Use left and right arrow keys to change scene, or read the text findings below."></div>
+      <button id="navprev" class="nav prev" aria-label="Previous">
+        <span>&#8249;</span></button>
+      <button id="navnext" class="nav next" aria-label="Next">
+        <span>&#8250;</span><b id="navhint"></b></button>
       <div id="cpsum" class="cpsum" hidden></div>
       <div id="ispanel" class="ispanel" hidden>
         <div class="ishead">
