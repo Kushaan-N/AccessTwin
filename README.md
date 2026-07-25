@@ -38,16 +38,16 @@ It starts automatically, loops, and needs no input.
 
 | Body | Floor reached | Destinations | Stranded |
 |---|---|---|---|
-| Walking adult | 567.7 m² (100%) | 4 / 4 | — |
-| Wheelchair user | 370.4 m² (65.2%) | 2 / 4 | **141.8 m²** |
-| Cane user | 430.5 m² (75.8%) | 2 / 4 | 52.8 m² |
-| Delivery robot | 451.9 m² (79.6%) | 3 / 4 | 88.4 m² |
+| Walking adult | 977.2 m² (100%) | 5 / 5 | — |
+| Wheelchair user | 648.1 m² (66.3%) | 3 / 5 | **214 m²** |
+| Cane user | 701.8 m² (71.9%) | 3 / 5 | 100 m² |
+| Delivery robot | 809.5 m² (82.8%) | 4 / 5 | 119 m² |
 
 The delivery robot passes through the 700 mm door that excludes the wheelchair.
 The same building admits a machine and turns away a person.
 
-**Detection: 8 of 8 planted defects recovered**, by an analysis that is never told
-where to look, plus 9 emergent exclusions nobody planted — pinch points created by
+**Detection: 12 of 12 planted defects recovered**, by an analysis that is never told
+where to look, plus dozens of emergent exclusions nobody planted — pinch points created by
 where the furniture landed rather than by the architecture.
 
 **Repair:** with a $6,000 budget the optimum is $4,512 (widen the 700 mm door),
@@ -73,7 +73,13 @@ a few seconds on a laptop; a single profile rebake is about 2 ms.
 ### Controls
 
 The demo self-runs and loops. Drag to orbit, scroll to zoom, `Space` restarts,
-`←`/`→` step scenes, `P` pauses.
+`←`/`→` step scenes, `P` pauses. In the *Where does it close?* scene, drag the
+body-width slider — every room is re-tested live and switches off as the body
+widens.
+
+Note: the walkthrough is driven by `requestAnimationFrame`, which browsers
+suspend entirely in a background tab. Keep the window foreground while
+presenting.
 
 ---
 
@@ -122,10 +128,14 @@ optimiser considers are discovered this way, never hand-listed.**
 
 ## The building
 
-A generated civic centre, 32 × 22 m: entrance, lobby, café, spine corridor,
-community room, accessible WC, and a gallery raised 600 mm. Eight defects are
-planted, every one a condition that occurs constantly in practice and passes a
-plan check.
+A generated civic centre, 44 × 30 m, 250 solids across nine rooms: an open atrium
+with a café in it, a spine corridor, community room, auditorium, accessible WC,
+lift, reading room, and a gallery raised 600 mm. The plan is deliberately open —
+a corridor-and-cells building hides its access failures behind doors, whereas an
+atrium fails in public, in the middle of the floor.
+
+Twelve defects are planted, every one a condition that occurs constantly in
+practice and passes a plan check.
 
 | Defect | Type | Excludes |
 |---|---|---|
@@ -133,14 +143,33 @@ plan check.
 | 1200 mm door on a 200 mm threshold | level change | wheelchair, robot |
 | Gallery ramp at 1:6.7 | running slope | wheelchair, robot, cane |
 | Four-riser stair, 150 mm | level change | wheelchair, robot |
-| Unprotected 600 mm slab edge, 8.9 m | level change | all wheeled |
+| Unprotected 600 mm slab edge | level change | all wheeled |
 | WC with every fixture correct, 1300 mm circle | turning space | wheelchair |
+| Lift car sized by capacity, 1600 × 1400 mm | turning space | wheelchair |
+| Auditorium: 850 mm aisle, no designated space | clear width | cane, wheelchair |
 | Duct bulkhead at 1950 mm | head clearance | cane |
+| Screen hung at 1550 mm, projecting 350 mm | head clearance | cane |
+| Café counter at 1050 mm, no lowered section | counter height | wheelchair |
 | 860 mm gap between two benches | clear width | cane |
 
-Meeting Room B is the control: 1.4 m doors, level threshold, generous turning
+The reading room is the control: 1.4 m doors, level threshold, generous turning
 space, reachable by all four. Not every room here is broken, and the analysis has
 to be able to say so.
+
+### Where it closes
+
+Sweeping body width across the population range, holding a real wheelchair's
+slope and step tolerance fixed:
+
+| Body width | Rooms closed |
+|---|---|
+| 18–26 in | Gallery only — and never for a width reason |
+| **28 in** | **+ Community Room, Accessible WC** |
+| **32 in** | **+ Lift** — a standard powered wheelchair |
+| 48 in | + Auditorium |
+
+The gallery is closed at every width in the sweep, because it was never a width
+problem: it is a 1:6.7 ramp and a four-riser stair.
 
 Because the building is authored, an answer key exists — which is what makes the
 recall figure possible and is the one thing no dataset-based approach can offer.
