@@ -1543,6 +1543,19 @@ function resetRemedy() {
   el("remedystate").textContent = "";
 }
 
+/* The reach figures beside the stage. After the remediation is applied the
+   building has actually changed, so the numbers must follow it. */
+function renderChips(s) {
+  const showAfter = remedied && s && s.remediable;
+  el("chips").innerHTML = D.profiles.map(p => {
+    const on = s && s.profile === p.name;
+    const pct = showAfter && p.after_pct != null ? p.after_pct : p.pct;
+    return `<span class="chip${on ? " on" : ""}">
+      <i style="background:${p.c}"></i>${p.label}
+      <b>${pct}%</b></span>`;
+  }).join("");
+}
+
 function triggerRemedy() {
   if (remedied) return;
   remedied = true;
@@ -1557,6 +1570,7 @@ function triggerRemedy() {
   el("remedybtn").textContent = "Remediated";
   el("live").textContent =
     "Remediation applied. The wheelchair completes the route.";
+  renderChips(SCENES[sceneI]);
 }
 
 /* ---------- scene script ---------- */
@@ -2066,12 +2080,7 @@ function applyScene(i) {
     liveEl.textContent = `Scene ${i + 1} of ${SCENES.length}. ` +
       `${s.kicker}. ${plain}`;
   }
-  el("chips").innerHTML = D.profiles.map(p => {
-    const on = s.profile === p.name;
-    return `<span class="chip${on ? " on" : ""}">
-      <i style="background:${p.c}"></i>${p.label}
-      <b>${(s.id === "fix" ? p.after_pct : p.pct)}%</b></span>`;
-  }).join("");
+  renderChips(s);
   clearMarkers();
   resetWalks(s);
   userCam = false;
