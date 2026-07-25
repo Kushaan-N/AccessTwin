@@ -651,6 +651,13 @@ def optimise(free, height, cell, spawn, goals, budget: float = 5000.0,
                   "pct_per_1k_usd": round(
                       t["gain"] / max(t["fx"]["cost"], 1) * 1000, 2)}
                  for t in scored], key=lambda d: -d["pct_per_1k_usd"])
+            # Keep each candidate's measured per-profile outcome so a
+            # caller can tell "this fix opens a room on its own" from
+            # "this fix buys nothing unless others happen too".
+            for d, t in zip(standalone, sorted(
+                    scored, key=lambda q: -(q["gain"] /
+                                            max(q["fx"]["cost"], 1) * 1000))):
+                d["by_profile"] = t["s"].get("by_profile", {})
         # Keep only fixes that actually move the needle, then rank by
         # population unlocked per dollar. Area gain breaks ties so a fix
         # that opens floor without flipping a goal still counts.
@@ -706,6 +713,7 @@ def optimise(free, height, cell, spawn, goals, budget: float = 5000.0,
         "spent_usd": round(spent),
         "unspent_usd": round(budget - spent),
         "before": start, "after": cur,
+        "baseline_by_profile": start.get("by_profile", {}),
         "coverage_gain_pct": round(cur["pct_full_access"] -
                                    start["pct_full_access"], 1),
         "candidates_considered": len(cands),
