@@ -37,17 +37,17 @@ It starts automatically, loops, and needs no input.
 
 ## Results (seed 7)
 
-| Body | Floor reached | Destinations | Stranded |
-|---|---|---|---|
-| Walking adult | 977.2 m² (100%) | 5 / 5 | — |
-| Wheelchair user | 648.1 m² (66.3%) | 3 / 5 | **214 m²** |
-| Cane user | 701.8 m² (71.9%) | 3 / 5 | 100 m² |
-| Delivery robot | 809.5 m² (82.8%) | 4 / 5 | 119 m² |
+| Body | Floor reached | Destinations |
+|---|---|---|
+| Walking adult | 100% | 5 / 5 |
+| Wheelchair user | **63.2%** | 2 / 5 |
+| Cane user | 71.9% | 3 / 5 |
+| Delivery robot | 82.8% | 4 / 5 |
 
 The delivery robot passes through the 700 mm door that excludes the wheelchair.
 The same building admits a machine and turns away a person.
 
-**Detection: 12 of 12 planted defects recovered**, by an analysis that is never told
+**Detection: 13 of 13 planted defects recovered**, by an analysis that is never told
 where to look, plus dozens of emergent exclusions nobody planted — pinch points created by
 where the furniture landed rather than by the architecture.
 
@@ -74,10 +74,14 @@ a few seconds on a laptop; a single profile rebake is about 2 ms.
 
 ### Controls
 
-The demo self-runs and loops. Drag to orbit, scroll to zoom, `Space` restarts,
-`←`/`→` step scenes, `P` pauses. In the *Where does it close?* scene, drag the
-body-width slider — every room is re-tested live and switches off as the body
-widens.
+The demo runs 2 min 52 s and loops. Drag to orbit, scroll to zoom, `Space`
+restarts, `←`/`→` step scenes, `P` pauses, `Esc` closes a panel. Two scenes are
+interactive: drag the body-width slider in *Where does it close?*, and click any
+marker in *Every blockage, priced*.
+
+It is also usable without the 3D view: there is a skip link to a text version of
+every finding, each scene is announced to a live region, and
+`prefers-reduced-motion` is honoured.
 
 Note: the walkthrough is driven by `requestAnimationFrame`, which browsers
 suspend entirely in a background tab. Keep the window foreground while
@@ -153,10 +157,24 @@ practice and passes a plan check.
 | Screen hung at 1550 mm, projecting 350 mm | head clearance | cane |
 | Café counter at 1050 mm, no lowered section | counter height | wheelchair |
 | 860 mm gap between two benches | clear width | cane |
+| **22 mm deep-pile carpet in the auditorium** | **floor surface** | **wheelchair only** |
 
 The reading room is the control: 1.4 m doors, level threshold, generous turning
 space, reachable by all four. Not every room here is broken, and the analysis has
 to be able to say so.
+
+### The floor itself
+
+ADA 302 governs the material, not the geometry, and nothing in a
+clearance-and-slope analysis can see it. Surfaces carry firmness, pile
+height, opening width and rolling resistance; profiles carry tolerances
+against those, so blocking is *derived* rather than enumerated.
+
+The auditorium is carpeted at 22 mm where ADA 302.2 allows 13. It is level,
+wide, generous, and compliant on every dimension a tape measure reaches — and
+it stops a wheelchair and nothing else. The cane user walks across it; the
+delivery robot rides over it on larger wheels; only the 100 mm front castors
+of a manual chair dig in.
 
 ### Where it closes
 
