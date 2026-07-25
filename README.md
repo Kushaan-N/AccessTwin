@@ -21,16 +21,17 @@ It starts automatically, loops, and needs no input.
 ### What the prototype proves
 
 1. **Regions exist that satisfy every clearance, slope and turning rule while being
-   completely unreachable.** In the generated building, 142 m² is stranded from a
-   wheelchair — a community room and a gallery, both flawless inside.
+   completely unreachable.** 215 m² is stranded from a wheelchair — a community
+   room and a gallery, both flawless inside.
 2. **The exact body width at which a space begins excluding people can be found by
    bisection**, and it disagrees with what a tape measure reports. The route to the
-   gallery measures 94 inches of clear width and admits *no body of any width*,
-   because it is a slope-and-step problem, not a width problem.
-3. **The highest-value remediation is frequently not the obvious one — and the
-   best-scoring one can be actively harmful.** The repair with the best coverage
-   per dollar is rejected here, because rebuilding the building that way costs the
-   wheelchair a destination it has today.
+   community room measures **47 inches** of clear width and serves **27.6** once
+   slope and level change are counted too; the route to the gallery measures 47
+   inches and admits *no body of any width*, because it was never a width problem.
+3. **The best-scoring remediation can be actively harmful.** The repair with the
+   highest coverage-per-dollar here — 3.3 points per $1k against the winner's 0.2,
+   fifteen times better — is rejected outright, because rebuilding the building
+   that way takes floor away from the wheelchair user it was meant to serve.
 
 ---
 
@@ -51,9 +52,10 @@ where to look, plus dozens of emergent exclusions nobody planted — pinch point
 where the furniture landed rather than by the architecture.
 
 **Repair:** with a $6,000 budget the optimum is $4,512 (widen the 700 mm door),
-returning the wheelchair from 65.2% to 75.2% of the floor and the cane user from
-75.8% to 85.1%. A $4,204 repair scored 1.1 points per $1k against 0.2 and was
-still rejected — rebuilt that way, the wheelchair loses a destination.
+returning the wheelchair from 66.3% to **77.0%** of the floor and the cane user
+from 71.9% to **82.1%**, with no profile losing anything. Two cheaper repairs
+that scored better in aggregate were rejected: one costs the wheelchair 0.9
+points of floor, the other costs the walking adult a destination outright.
 
 ---
 

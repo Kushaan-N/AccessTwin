@@ -668,9 +668,9 @@ def optimise(free, height, cell, spawn, goals, budget: float = 5000.0,
                     return (f"the {who} loses a destination it has today"
                             if lost == 1 else
                             f"the {who} loses {lost} destinations it has today")
-                if after["pct"] < before["pct"] - 1.0:
+                if after["pct"] < before["pct"] - 0.25:
                     return (f"the {who} loses "
-                            f"{before['pct'] - after['pct']:.0f} points of "
+                            f"{before['pct'] - after['pct']:.1f} points of "
                             f"reachable floor")
             return None
 
