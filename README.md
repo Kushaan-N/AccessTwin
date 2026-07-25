@@ -79,6 +79,11 @@ restarts, `←`/`→` step scenes, `P` pauses, `Esc` closes a panel. Two scenes 
 interactive: drag the body-width slider in *Where does it close?*, and click any
 marker in *Every blockage, priced*.
 
+**Inspect issues** (button, or `I`) leaves the walkthrough entirely and gives you
+the worklist: every finding at once, free camera, a filterable list, and a
+clickable marker on each. Selecting one flies the camera to it and shows what
+fixes it and what that costs. `Esc` returns.
+
 It is also usable without the 3D view: there is a skip link to a text version of
 every finding, each scene is announced to a live region, and
 `prefers-reduced-motion` is honoured.
