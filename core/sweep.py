@@ -35,6 +35,18 @@ def _clusters(mask, min_cells):
             yield m
 
 
+def _bbox(m, cell):
+    """Metric extent of a finding.
+
+    A representative point is misleading for anything linear: an 8.9 m
+    unprotected slab edge is one finding, and which cell along it happens
+    to be the deepest is arbitrary. Callers match against the extent.
+    """
+    ys, xs = np.nonzero(m)
+    return [round(float(ys.min()) * cell, 2), round(float(xs.min()) * cell, 2),
+            round(float(ys.max()) * cell, 2), round(float(xs.max()) * cell, 2)]
+
+
 def sweep(grid: NavGrid, free, cell, rooms=None, spawn=None) -> list:
     """Every rule, everywhere. Returns a flat list of findings."""
     out = []
@@ -59,6 +71,7 @@ def sweep(grid: NavGrid, free, cell, rooms=None, spawn=None) -> list:
             yx = np.unravel_index(int(np.argmin(w)), w.shape)
             out.append(dict(type="clearance_width", agent=p.name,
                             pos=[round(yx[0] * cell, 2), round(yx[1] * cell, 2)],
+                            bbox=_bbox(m, cell),
                             measured_in=round(float(width[yx] * IN_PER_M), 1),
                             threshold_in=p.required_clearance_in))
 
@@ -73,6 +86,7 @@ def sweep(grid: NavGrid, free, cell, rooms=None, spawn=None) -> list:
             out.append(dict(type="slope_gradient", agent=p.name,
                             pos=[round(float(ys[k]) * cell, 2),
                                  round(float(xs[k]) * cell, 2)],
+                            bbox=_bbox(m, cell),
                             measured=round(float(np.median(grid.slope[m])), 3),
                             threshold=round(p.max_slope_ratio, 3)))
 
@@ -82,6 +96,7 @@ def sweep(grid: NavGrid, free, cell, rooms=None, spawn=None) -> list:
             yx = np.unravel_index(int(np.argmax(s)), s.shape)
             out.append(dict(type="step_height", agent=p.name,
                             pos=[round(yx[0] * cell, 2), round(yx[1] * cell, 2)],
+                            bbox=_bbox(m, cell),
                             measured_in=round(float(grid.step[yx] * IN_PER_M), 1),
                             threshold_in=p.max_step_in))
 
@@ -94,6 +109,7 @@ def sweep(grid: NavGrid, free, cell, rooms=None, spawn=None) -> list:
                 out.append(dict(type="head_clearance", agent=p.name,
                                 pos=[round(yx[0] * cell, 2),
                                      round(yx[1] * cell, 2)],
+                                bbox=_bbox(m, cell),
                                 measured_in=round(
                                     float(grid.headroom[yx] * IN_PER_M), 1),
                                 threshold_in=p.head_clearance_in))
