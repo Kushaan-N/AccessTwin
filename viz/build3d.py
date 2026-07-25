@@ -48,6 +48,7 @@ def main():
             sys.exit(f"missing {p}")
 
     three = three_as_global(open(three_path).read())
+    detail = open(os.path.join(ROOT, "viz", "detail3d.js")).read()
     app = open(os.path.join(ROOT, "viz", "app3d.js")).read()
     shell = open(os.path.join(ROOT, "viz", "shell3d.html")).read()
     scene = json.load(open(scene_path))
@@ -56,6 +57,13 @@ def main():
     blob = json.dumps(scene, separators=(",", ":")).replace("</", "<\\/")
 
     body = (shell
+            # Capture load-time and animation-loop errors onto window so a
+            # failure is inspectable even when devtools is not attached.
+            + '\n<script>window.__ERR=[];'
+            + 'addEventListener("error",e=>window.__ERR.push('
+            + '(e.message||"")+" @"+(e.filename||"")+":"+(e.lineno||0)));'
+            + 'addEventListener("unhandledrejection",'
+            + 'e=>window.__ERR.push("promise: "+e.reason));</script>'
             + '\n<script type="application/json" id="scene-data">'
             + blob + "</script>\n"
             + '<script type="module">\n'
@@ -66,7 +74,7 @@ def main():
             # uses the same obvious names; sharing one module scope makes
             # them collide at parse time.
             + three + "\nwindow.THREE=THREE;\n"
-            + "(function(){\n" + app + "\n})();\n</script>\n")
+            + "(function(){\n" + detail + "\n" + app + "\n})();\n</script>\n")
 
     os.makedirs(os.path.join(ROOT, "out"), exist_ok=True)
     art = os.path.join(ROOT, "out", "artifact3d.html")
@@ -84,7 +92,7 @@ def main():
 
     print(f"scene  {len(blob)/1024:8.0f} kB")
     print(f"three  {len(three)/1024:8.0f} kB")
-    print(f"app    {len(app)/1024:8.0f} kB")
+    print(f"app    {(len(app)+len(detail))/1024:8.0f} kB")
     print(f"page   {len(doc)/1024:8.0f} kB -> {idx}")
     print(f"                    -> {art}  (body-only, for publishing)")
 
