@@ -1630,7 +1630,7 @@ const SCENES = [
         threshold. <em>Two ways in, neither usable.</em>`;
     },
     stat: () => [n0(P.wheelchair.pct, 1) + "%", "of the floor reached"],
-    walk: [["wheelchair", "community_room", 0]],
+    walk: [["wheelchair", "community_room", 0]], pace: 0.55,
     enter() { hideAgents(); decalGroup.visible = false; setWallCut(0.22); },
     tick(t) { followStopped("wheelchair", t, 9, -5, 6, "community_room"); },
     onStop(pname, goal) {
@@ -1677,7 +1677,7 @@ const SCENES = [
     }
   },
   {
-    id: "remediate", dur: 22.0, kicker: "Fix it, and walk it again",
+    id: "remediate", dur: 21.0, kicker: "Fix it, and walk it again",
     profile: "wheelchair", remediable: true,
     // Each leg gets about a third of the scene: walk up, a beat at the
     // door for somebody to press the button, then walk through.
@@ -1760,14 +1760,14 @@ const SCENES = [
     }
   },
   {
-    id: "cane", dur: 9.0, kicker: "Cane user · WC", profile: "vision_impaired_cane",
+    id: "cane", dur: 11.0, kicker: "Cane user · WC", profile: "vision_impaired_cane",
     cap: `A cane sweeps a 42-inch arc — <em>wider than a wheelchair</em>. It
           clears the corridor, then meets a bulkhead dropped to 1 950 mm over
           the accessible WC door. <em>The WC excludes two different people for
           two entirely different reasons</em>: headroom here, and a 42-inch
           turning circle where 60 are required, inside.`,
     stat: () => ["1 950 mm", "headroom, needs 2 032"],
-    walk: [["vision_impaired_cane", "restroom", 0]],
+    walk: [["vision_impaired_cane", "restroom", 0]], pace: 0.5,
     enter() { hideAgents(); clearMarkers(); decalGroup.visible = false; setWallCut(0.22); },
     tick(t) { followStopped("vision_impaired_cane", t, 7, -4, 4.5, "restroom"); },
     onStop(pname, goal) {
@@ -1820,7 +1820,7 @@ const SCENES = [
     }
   },
   {
-    id: "choke", dur: 14.0, kicker: "Every blockage, priced",
+    id: "choke", dur: 13.0, kicker: "Every blockage, priced",
     cap: `<em>Click any marker.</em> Each blockage carries a verdict: move
           the furniture and it costs nothing; re-lay fixed seating or widen
           an opening and it costs money; or — the case a two-way split
@@ -1907,7 +1907,14 @@ function eyeLevel(pname, back) {
    while looking at blank wall. The second shot is composed around the
    barrier: back along the approach, offset to one side so the opening
    reads as an opening, and high enough to keep the label in view. */
-const POV_HOLD = 1.3;
+// Seconds spent at the stopped body's own eye level before pulling out to
+// the shot that shows what stopped it. This used to be 1.3s and the ease
+// out of it 1.1s, so the composed wide shot -- the one carrying the
+// measurement callout -- did not exist until 2.4s after the body stopped.
+// Measured against the scene clock that left 1.4s of readable frame in the
+// wheelchair scene and 0.5s in the cane scene, which is not reading time.
+const POV_HOLD = 0.5;
+const POV_EASE = 0.65;
 
 function barrierOf(pname, goal) {
   const j = P[pname].journeys[goal];
@@ -1931,14 +1938,14 @@ function followStopped(pname, t, back, side, up, goal) {
   // Midpoint of body and barrier, framed from the side.
   const mx = (s.p[0] + b.pos[0]) / 2, my = (s.p[1] + b.pos[1]) / 2;
   const dx = s.dir[0], dy = s.dir[1];
-  const ease = Math.min(1, (since - POV_HOLD) / 1.1);
+  const ease = Math.min(1, (since - POV_HOLD) / POV_EASE);
   lookAt(mx - dx * (5.6 * ease + 1.2) + dy * 4.2 * ease,
          my - dy * (5.6 * ease + 1.2) - dx * 4.2 * ease,
          1.7 + 2.4 * ease,
          mx, my, 1.5);
 }
 
-/* Follow the agent that is currently walking, from behind and above. *//* Follow the agent that is currently walking, from behind and above. */
+/* Follow the agent that is currently walking, from behind and above. */
 function follow(pname, t, back, side, up) {
   back *= 0.62; side *= 0.62; up *= 0.72;
   const p = P[pname];
@@ -2295,7 +2302,21 @@ el("widthslider").addEventListener("input", e => {
 el("prev").addEventListener("click", () => goto(sceneI - 1));
 el("next").addEventListener("click", () => goto(sceneI + 1));
 addEventListener("keydown", e => {
-  if (e.key === " ") { e.preventDefault(); goto(0); }
+  // Space activates whatever button has focus, so without this it both
+  // presses the button and toggles playback. And while the intro card is
+  // up there is nothing to pause yet.
+  const el0i = document.getElementById("intro");
+  if (el0i && !el0i.hidden) return;
+  const tag = e.target && e.target.tagName;
+  if (tag === "BUTTON" || tag === "INPUT" || tag === "TEXTAREA"
+      || tag === "SELECT") {
+    if (e.key === " " || e.key === "Enter") return;
+  }
+  // Space is the pause key everywhere that plays video; it was bound to
+  // restart here, which threw away the viewer's place at the exact moment
+  // they wanted to stop and read.
+  if (e.key === " ") { e.preventDefault(); el("play").click(); }
+  if (e.key.toLowerCase() === "r") { e.preventDefault(); goto(0); }
   if (e.key === "ArrowRight") { e.preventDefault(); goto(sceneI + 1); }
   if (e.key === "ArrowLeft") { e.preventDefault(); goto(sceneI - 1); }
   if (e.key.toLowerCase() === "p") { el("play").click(); }

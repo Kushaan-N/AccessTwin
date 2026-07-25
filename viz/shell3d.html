@@ -122,7 +122,12 @@
   text-wrap:balance}
 .block em{font-style:normal;font-weight:600;color:var(--ink)}
 
-.rail{display:flex;flex-direction:column;gap:9px;min-height:0}
+.rail{display:flex;flex-direction:column;gap:9px;min-height:0;
+  overflow-y:auto;scrollbar-width:thin;
+  scrollbar-color:var(--rule) transparent}
+.rail::-webkit-scrollbar{width:6px}
+.rail::-webkit-scrollbar-thumb{background:var(--rule);border-radius:3px}
+.rail::-webkit-scrollbar-track{background:transparent}
 .card{background:var(--sheet);border:1px solid var(--rule);border-radius:3px;
   padding:10px 11px}
 .card h3{font-family:var(--mono);font-size:10px;font-weight:600;
@@ -545,9 +550,9 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--panel);
     <button id="restart">Restart</button>
     <button id="prev">&larr;</button>
     <button id="next">&rarr;</button>
-    <span>drag to orbit · scroll to zoom · <kbd>Space</kbd> restart
+    <span>drag to orbit · scroll to zoom · <kbd>Space</kbd> pause
       · <kbd>&larr;</kbd><kbd>&rarr;</kbd> scenes · <kbd>1</kbd>&ndash;<kbd>9</kbd>
-      jump · <kbd>P</kbd> pause</span>
+      jump · <kbd>R</kbd> restart</span>
     <span class="sp" id="run"></span>
   </footer>
 </div>
