@@ -42,7 +42,7 @@ renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 1.08;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 stage.appendChild(renderer.domElement);
 
@@ -59,12 +59,12 @@ function applyEnv() {
 applyEnv();
 
 /* ---------- lighting ---------- */
-const hemi = new THREE.HemisphereLight(0xffffff, 0x404852, 1.5);
+const hemi = new THREE.HemisphereLight(0xffffff, 0x404852, 0.30);
 scene.add(hemi);
-const key = new THREE.DirectionalLight(0xffffff, 2.1);
+const key = new THREE.DirectionalLight(0xfff4e6, 2.5);
 key.position.set(18, 26, -6);
 key.castShadow = true;
-key.shadow.mapSize.set(2048, 2048);
+key.shadow.mapSize.set(4096, 4096);
 key.shadow.camera.near = 1;
 key.shadow.camera.far = 90;
 const SH = 26;
@@ -73,30 +73,60 @@ key.shadow.bias = -0.0009;
 key.shadow.normalBias = 0.02;
 key.target.position.copy(CTR);
 scene.add(key, key.target);
-const fill = new THREE.DirectionalLight(0xbcd0e0, 0.45);
+const fill = new THREE.DirectionalLight(0xbcd0e0, 0.25);
 fill.position.set(-14, 12, 20);
 scene.add(fill);
 
 /* ---------- materials ---------- */
 const MAT = {};
+let SURF = null, ENV = null;
 function buildMaterials() {
-  const mk = (col, rough, metal, extra) => new THREE.MeshStandardMaterial(
-    Object.assign({ color: new THREE.Color(col), roughness: rough,
-                    metalness: metal || 0 }, extra || {}));
-  MAT.wall = mk(TOK.wall, 0.94, 0);
-  MAT.floor = mk(TOK.floor, 0.96, 0);
-  MAT.gallery = mk(TOK.gallery, 0.9, 0);
-  MAT.ramp = mk(TOK.ramp, 0.85, 0);
-  MAT.concrete = mk(TOK.concrete, 0.92, 0);
-  MAT.timber = mk(TOK.timber, 0.7, 0);
-  MAT.fabric = mk(TOK.fabric, 1.0, 0);
-  MAT.porcelain = mk(TOK.porcelain, 0.25, 0);
-  MAT.steel = mk(TOK.steel, 0.3, 0.85);
-  MAT.soffit = mk(TOK.soffit, 0.9, 0);
-  MAT.parapet = mk(TOK.parapet, 0.9, 0);
-  MAT.header = mk(TOK.wall, 0.94, 0);
-  MAT.glass = mk(TOK.glass, 0.12, 0, {
-    transparent: true, opacity: 0.22, side: THREE.DoubleSide });
+  if (!SURF) {
+    SURF = {
+      tile: makeSurface(THREE, "tile", 6),
+      concrete: makeSurface(THREE, "concrete", 5),
+      plaster: makeSurface(THREE, "plaster", 4),
+      wood: makeSurface(THREE, "wood", 3),
+      fabric: makeSurface(THREE, "fabric", 6)
+    };
+  }
+  if (ENV) ENV.dispose();
+  ENV = makeEnvironment(THREE, renderer, TOK.dark);
+  scene.environment = ENV;
+
+  // Maps are shared, but each material clones its own repeat so a 12 m
+  // floor and a 0.4 m table top do not show the same tile size.
+  const tex = (kit, rep) => {
+    if (!kit) return {};
+    const map = kit.map.clone(), normalMap = kit.normalMap.clone();
+    map.needsUpdate = normalMap.needsUpdate = true;
+    [map, normalMap].forEach(t => {
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.repeat.set(rep, rep);
+    });
+    map.colorSpace = THREE.SRGBColorSpace;
+    return { map, normalMap, normalScale: new THREE.Vector2(0.55, 0.55) };
+  };
+  const mk = (col, rough, metal, kit, rep, extra) =>
+    new THREE.MeshStandardMaterial(Object.assign(
+      { color: new THREE.Color(col), roughness: rough, metalness: metal || 0,
+        envMapIntensity: TOK.dark ? 0.8 : 1.0 },
+      tex(kit, rep || 4), extra || {}));
+
+  MAT.wall      = mk(TOK.wall, 0.95, 0, SURF.plaster, 7);
+  MAT.floor     = mk(TOK.floor, 0.70, 0, SURF.tile, 10);
+  MAT.gallery   = mk(TOK.gallery, 0.66, 0, SURF.tile, 5);
+  MAT.ramp      = mk(TOK.ramp, 0.80, 0, SURF.concrete, 4);
+  MAT.concrete  = mk(TOK.concrete, 0.90, 0, SURF.concrete, 4);
+  MAT.timber    = mk(TOK.timber, 0.60, 0, SURF.wood, 2);
+  MAT.fabric    = mk(TOK.fabric, 0.98, 0, SURF.fabric, 3);
+  MAT.porcelain = mk(TOK.porcelain, 0.14, 0.02);
+  MAT.steel     = mk(TOK.steel, 0.26, 0.88);
+  MAT.soffit    = mk(TOK.soffit, 0.92, 0, SURF.plaster, 5);
+  MAT.parapet   = mk(TOK.parapet, 0.92, 0, SURF.plaster, 4);
+  MAT.header    = mk(TOK.wall, 0.95, 0, SURF.plaster, 4);
+  MAT.glass     = mk(TOK.glass, 0.06, 0.10, null, 1, {
+    transparent: true, opacity: 0.16, side: THREE.DoubleSide });
 }
 buildMaterials();
 
@@ -141,6 +171,17 @@ function buildSolids() {
     if (w <= 0 || d <= 0 || h <= 0) return;
     const mat = MAT[s.material] || MAT.wall;
     let mesh;
+    const furn = (s.kind === "furniture" || s.kind === "fixture")
+      ? makeFurniture(THREE, s, MAT) : null;
+    if (furn) {
+      // Assembled at the solid's own dimensions, so what the camera sees
+      // occupies exactly the footprint the analysis eroded around.
+      furn.position.copy(v3(s.x0 + w / 2, s.y0 + d / 2, s.z0));
+      furn.userData.solid = s;
+      building.add(furn);
+      SOLID_MESHES.push(furn);
+      return;
+    }
     if (s.kind === "ramp") {
       mesh = new THREE.Mesh(rampGeometry(w, d, s.rz0, s.rz1, s.axis), mat);
       mesh.position.copy(v3(s.x0 + w / 2, s.y0 + d / 2, s.z0));
@@ -336,111 +377,78 @@ function drawRoute(path, color, arrived) {
 function makeAgent(profile) {
   const g = new THREE.Group();
   const col = new THREE.Color(profile.c);
-  const skin = new THREE.MeshStandardMaterial({ color: col, roughness: 0.55 });
-  const dark = new THREE.MeshStandardMaterial({
-    color: col.clone().multiplyScalar(0.55), roughness: 0.7 });
-  const metal = new THREE.MeshStandardMaterial({
-    color: 0xb9c3cb, roughness: 0.35, metalness: 0.8 });
   const parts = {};
 
-  const torso = (h, r) => new THREE.Mesh(
-    new THREE.CapsuleGeometry(r, h, 4, 12), skin);
-
   if (profile.body === "wheelchair") {
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.1, 0.5), dark);
-    seat.position.y = 0.50; g.add(seat);
-    const back = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.5, 0.08), dark);
-    back.position.set(0, 0.75, -0.21); g.add(back);
-    const t = torso(0.42, 0.17); t.position.set(0, 0.80, 0.02); g.add(t);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.115, 20, 14), skin);
-    head.position.set(0, 1.11, 0.02); g.add(head);
-    const wheelG = new THREE.TorusGeometry(0.30, 0.035, 10, 26);
-    parts.wheels = [];
-    [-0.30, 0.30].forEach(sx => {
-      const wm = new THREE.Mesh(wheelG, metal);
-      wm.position.set(sx, 0.30, -0.04);
-      wm.rotation.y = Math.PI / 2;
-      g.add(wm); parts.wheels.push(wm);
-    });
-    [-0.22, 0.22].forEach(sx => {
-      const c = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.025, 8, 16), metal);
-      c.position.set(sx, 0.09, 0.30); c.rotation.y = Math.PI / 2; g.add(c);
-      parts.wheels.push(c);
-    });
-    parts.eyeH = 1.15;
+    const chair = makeWheelchair(THREE, profile.c);
+    g.add(chair.group);
+    parts.wheels = chair.wheels;
+    const rider = makeFigure(THREE, profile.c, { seated: true });
+    rider.group.position.set(0, 0.04, 0.02);
+    g.add(rider.group);
+    parts.figure = rider.parts;
+    parts.seated = true;
+    parts.eyeH = 1.25;
   } else if (profile.body === "robot") {
-    const b = new THREE.Mesh(new THREE.BoxGeometry(0.60, 0.55, 0.78), skin);
-    b.position.y = 0.42; g.add(b);
-    const lid = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.07, 0.80), dark);
-    lid.position.y = 0.73; g.add(lid);
-    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.34), metal);
-    mast.position.set(0, 0.9, -0.28); g.add(mast);
-    const flag = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 10), dark);
-    flag.position.set(0, 1.08, -0.28); g.add(flag);
-    parts.wheels = [];
-    [[-0.31, 0.26], [0.31, 0.26], [-0.31, -0.26], [0.31, -0.26]].forEach(
-      ([sx, sz]) => {
-        const wm = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.15, 0.15, 0.07, 16), metal);
-        wm.position.set(sx, 0.15, sz); wm.rotation.z = Math.PI / 2;
-        g.add(wm); parts.wheels.push(wm);
-      });
+    const r = makeRobot(THREE, profile.c);
+    g.add(r.group);
+    parts.wheels = r.wheels;
     parts.eyeH = 0.95;
   } else {
-    const t = torso(0.52, 0.16); t.position.y = 1.06; g.add(t);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 20, 14), skin);
-    head.position.y = 1.51; g.add(head);
-    parts.legs = [];
-    [-0.11, 0.11].forEach(sx => {
-      const l = new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.52, 4, 10), dark);
-      l.position.set(sx, 0.42, 0);
-      l.geometry.translate(0, -0.26, 0);
-      l.position.y = 0.72;
-      g.add(l); parts.legs.push(l);
-    });
-    parts.arms = [];
-    [-0.24, 0.24].forEach(sx => {
-      const a = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.40, 4, 10), skin);
-      a.geometry.translate(0, -0.20, 0);
-      a.position.set(sx, 1.30, 0);
-      g.add(a); parts.arms.push(a);
-    });
+    const f = makeFigure(THREE, profile.c, {});
+    g.add(f.group);
+    parts.figure = f.parts;
+    parts.eyeH = 1.62;
     if (profile.body === "cane") {
       const cane = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.014, 0.014, 1.15, 8),
-        new THREE.MeshStandardMaterial({ color: 0xf2f4f6, roughness: 0.5 }));
-      cane.geometry.translate(0, -0.575, 0);
-      cane.position.set(0.24, 1.10, 0.05);
-      cane.rotation.x = -0.28;
-      g.add(cane); parts.cane = cane;
-      // The 42-inch sweep arc: this profile's real footprint, and the
-      // reason it is the widest body in the population.
+        new THREE.CylinderGeometry(0.013, 0.013, 1.20, 8),
+        new THREE.MeshStandardMaterial({
+          color: 0xf4f6f8, roughness: 0.42, metalness: 0.1 }));
+      cane.geometry.translate(0, -0.60, 0);
+      const pivot = new THREE.Group();
+      pivot.position.set(0.20, 1.05, 0.10);
+      pivot.rotation.x = -0.30;
+      pivot.add(cane);
+      g.add(pivot);
+      parts.cane = pivot;
+      // The 42-inch sweep arc is this profile's real footprint and the
+      // reason it is the widest body in the population, so it is drawn at
+      // exactly the radius the analysis eroded by.
       const arc = new THREE.Mesh(
-        new THREE.RingGeometry(0.12, profile.width_in * 0.0254 / 2, 40, 1,
-                               -0.75, 1.5),
+        new THREE.RingGeometry(0.14, profile.width_in * 0.0254 / 2, 48, 1,
+                               -0.8, 1.6),
         new THREE.MeshBasicMaterial({
-          color: col, transparent: true, opacity: 0.20,
+          color: col, transparent: true, opacity: 0.16,
           side: THREE.DoubleSide, depthWrite: false }));
       arc.rotation.x = -Math.PI / 2;
       arc.position.y = 0.02;
-      g.add(arc); parts.arc = arc;
+      g.add(arc);
+      parts.arc = arc;
     }
-    parts.eyeH = 1.55;
   }
 
   // Footprint ring: the body envelope the analysis actually used.
   const ring = new THREE.Mesh(
-    new THREE.RingGeometry(profile.width_in * 0.0254 / 2 - 0.03,
-                           profile.width_in * 0.0254 / 2, 44),
+    new THREE.RingGeometry(profile.width_in * 0.0254 / 2 - 0.025,
+                           profile.width_in * 0.0254 / 2, 52),
     new THREE.MeshBasicMaterial({ color: col, transparent: true,
-                                  opacity: 0.75, side: THREE.DoubleSide,
+                                  opacity: 0.7, side: THREE.DoubleSide,
                                   depthWrite: false }));
   ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.015;
+  ring.position.y = 0.02;
   g.add(ring);
   parts.ring = ring;
 
-  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  // Contact shadow: keeps a figure planted where the directional shadow
+  // map is grazing and would otherwise leave it floating.
+  const blob = new THREE.Mesh(
+    new THREE.CircleGeometry(profile.width_in * 0.0254 / 2 * 0.9, 24),
+    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true,
+                                  opacity: 0.24, depthWrite: false }));
+  blob.rotation.x = -Math.PI / 2;
+  blob.position.y = 0.008;
+  g.add(blob);
+
   g.userData.parts = parts;
   g.visible = false;
   scene.add(g);
@@ -484,17 +492,47 @@ function placeAgent(profile, sample, t) {
   const g = profile.agent, P = g.userData.parts;
   g.visible = true;
   g.position.copy(v3(sample.p[0], sample.p[1], sample.p[2]));
-  const yaw = Math.atan2(sample.dir[0], sample.dir[1]);
-  g.rotation.y = yaw;
+  g.rotation.y = Math.atan2(sample.dir[0], sample.dir[1]);
   const moving = sample.moving !== false;
-  if (P.wheels) P.wheels.forEach(w => { if (moving) w.rotation.x -= 0.16; });
-  if (P.legs) {
-    const s = moving ? Math.sin(t * 9) : 0;
-    P.legs[0].rotation.x = s * 0.55;
-    P.legs[1].rotation.x = -s * 0.55;
-    if (P.arms) { P.arms[0].rotation.x = -s * 0.4; P.arms[1].rotation.x = s * 0.4; }
+
+  if (P.wheels) P.wheels.forEach(w => { if (moving) w.rotation.z -= 0.20; });
+
+  const F = P.figure;
+  if (F) {
+    // Contralateral gait: opposite arm and leg swing together and the
+    // knee flexes on the recovery stroke. Without the knee bend a walk
+    // cycle reads as a puppet skating along the floor.
+    const s0 = moving ? Math.sin(t * 8.4) : 0;
+    const c0 = moving ? Math.cos(t * 8.4) : 0;
+    if (F.legs && !P.seated) {
+      F.legs[0].upper.rotation.x = s0 * 0.62;
+      F.legs[1].upper.rotation.x = -s0 * 0.62;
+      F.legs[0].lower.rotation.x = Math.max(0, -c0) * 0.75;
+      F.legs[1].lower.rotation.x = Math.max(0, c0) * 0.75;
+      if (moving) g.position.y += Math.abs(Math.sin(t * 8.4)) * 0.015;
+    }
+    if (F.arms) {
+      if (P.seated) {
+        // Pushing the rims: both arms cycle together, forward then down.
+        const push = moving ? Math.sin(t * 5.0) : 0;
+        F.arms.forEach(a => {
+          a.upper.rotation.x = 0.50 + push * 0.55;
+          a.lower.rotation.x = -0.55 - Math.max(0, push) * 0.35;
+        });
+      } else {
+        F.arms[0].upper.rotation.x = -s0 * 0.42;
+        F.arms[1].upper.rotation.x = s0 * 0.42;
+        F.arms[0].lower.rotation.x = -0.25 - Math.max(0, c0) * 0.20;
+        F.arms[1].lower.rotation.x = -0.25 - Math.max(0, -c0) * 0.20;
+      }
+    }
+    if (F.head) F.head.rotation.y = Math.sin(t * 1.3) * 0.12;
   }
-  if (P.cane) P.cane.rotation.z = Math.sin(t * 4.2) * 0.5;
+  if (P.cane) {
+    // Constant-contact sweep, in time with the stride.
+    P.cane.rotation.z = Math.sin(t * 4.2) * 0.52;
+    P.cane.rotation.x = -0.30 + Math.sin(t * 4.2 + 1.6) * 0.06;
+  }
 }
 
 /* ---------- markers ---------- */
@@ -906,6 +944,8 @@ function stepWalks(sc, t, dt) {
 const el = id => document.getElementById(id);
 function applyScene(i) {
   const s = SCENES[i];
+  window.__AT3 = Object.assign(window.__AT3 || {},
+    { SCENES, P, sceneI: i, D });
   el("kicker").textContent = s.kicker;
   el("caption").innerHTML = typeof s.cap === "function" ? s.cap() : s.cap;
   el("sceneno").textContent =
@@ -952,8 +992,16 @@ function frame(ts) {
   const s = SCENES[sceneI];
   if (playing) {
     sceneT += dt;
-    if (s.tick && !userCam) s.tick(sceneT);
-    stepWalks(s, sceneT, dt);
+    // A throw inside a scene tick used to strand the whole walkthrough on
+    // one scene: rAF was already re-armed, so the loop survived but never
+    // reached the advance below. Failures are now contained per-scene and
+    // reported once instead of silently freezing the demo.
+    try {
+      if (s.tick && !userCam) s.tick(sceneT);
+      stepWalks(s, sceneT, dt);
+    } catch (err) {
+      if (!s._warned) { s._warned = 1; console.error("scene", s.id, err); }
+    }
     if (sceneT >= s.dur) goto(sceneI + 1);
   }
 
@@ -1003,6 +1051,31 @@ const mo = () => { tokens(); buildMaterials(); applyEnv();
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", mo);
 new MutationObserver(mo).observe(document.documentElement,
   { attributes: true, attributeFilter: ["data-theme"] });
+
+/* Manual driver. requestAnimationFrame is suspended in a background
+   tab, so automated capture cannot rely on the render loop. This
+   advances the walkthrough by an explicit timestep and forces a draw,
+   which is also how the still frames for the write-up are produced. */
+window.__AT3 = Object.assign(window.__AT3 || {}, {
+  seek(index, seconds, dt) {
+    goto(index);   // NB: not named `scene` -- that shadows the THREE.Scene
+    const h = dt || 1 / 60;
+    for (let t = 0; t < seconds; t += h) {
+      clock += h;
+      sceneT += h;
+      try {
+        if (SCENES[sceneI].tick) SCENES[sceneI].tick(sceneT);
+        stepWalks(SCENES[sceneI], sceneT, h);
+      } catch (err) { console.error("seek", err); }
+    }
+    camState.pos.copy(camGoal.pos);
+    camState.tgt.copy(camGoal.tgt);
+    camera.position.copy(camState.pos);
+    camera.lookAt(camState.tgt);
+    renderer.render(scene, camera);
+    return SCENES[sceneI].kicker;
+  }
+});
 
 el("meta").textContent =
   `seed ${D.seed} · ${BW}×${BH} m · ${(D.grid.cell * 100).toFixed(0)} cm voxels · ` +
