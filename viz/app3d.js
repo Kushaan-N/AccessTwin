@@ -270,6 +270,18 @@ function instanceFurniture() {
       });
       im.instanceMatrix.needsUpdate = true;
       im.frustumCulled = false;   // one bounding sphere for a whole room
+      // Remember each instance's room and matrix so a room that closes
+      // can empty out. Without this the 84 auditorium seats -- by far
+      // the most visible contents in the building -- would stay put
+      // while everything around them vanished.
+      im.userData.inst = list.map((sl, k) => {
+        const cx = (sl.x0 + sl.x1) / 2, cy = (sl.y0 + sl.y1) / 2;
+        const rm = D.rooms.find(q => cx >= q.x0 && cx <= q.x1
+                                   && cy >= q.y0 && cy <= q.y1);
+        const mm = new THREE.Matrix4();
+        im.getMatrixAt(k, mm);
+        return { room: rm ? rm.name : "", matrix: mm };
+      });
       building.add(im);
     });
     list.forEach(s => handled.add(s));
@@ -600,6 +612,49 @@ D.rooms.forEach(r => {
 });
 roomGroup.visible = false;
 
+/* Which meshes belong to which room, so a room that closes can be
+   removed from the render rather than merely tinted. Watching a room
+   empty is a different experience from watching a rectangle change
+   colour. */
+const roomContents = {};
+D.rooms.forEach(r => { roomContents[r.name] = []; });
+const ZERO = new THREE.Matrix4().makeScale(1e-6, 1e-6, 1e-6);
+function setInstanceRooms(closed) {
+  building.children.forEach(im => {
+    if (!im.isInstancedMesh || !im.userData.inst) return;
+    let touched = false;
+    im.userData.inst.forEach((rec, k) => {
+      const hide = closed.has(rec.room);
+      im.setMatrixAt(k, hide ? ZERO : rec.matrix);
+      touched = true;
+    });
+    if (touched) im.instanceMatrix.needsUpdate = true;
+  });
+}
+
+function indexRoomContents() {
+  building.children.forEach(m => {
+    const s = m.userData && m.userData.solid;
+    if (!s || (s.kind !== "furniture" && s.kind !== "fixture")) return;
+    const cx = (s.x0 + s.x1) / 2, cy = (s.y0 + s.y1) / 2;
+    const r = D.rooms.find(q => cx >= q.x0 && cx <= q.x1
+                              && cy >= q.y0 && cy <= q.y1);
+    if (r) roomContents[r.name].push(m);
+  });
+}
+
+/* A ring at the spawn scaled to the slider: the body being tested,
+   drawn at true size so the number on the slider has a referent. */
+const probeRing = new THREE.Mesh(
+  new THREE.RingGeometry(0.9, 1.0, 56),
+  new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true,
+                                opacity: 0.85, side: THREE.DoubleSide,
+                                depthWrite: false, depthTest: false }));
+probeRing.rotation.x = -Math.PI / 2;
+probeRing.renderOrder = 40;
+probeRing.visible = false;
+scene.add(probeRing);
+
 const SWEEP = D.width_sweep || [];
 let widthIdx = 0;
 function applyWidth(i) {
@@ -609,10 +664,24 @@ function applyWidth(i) {
   const open = new THREE.Color(TOK.ok), shut = new THREE.Color(TOK.bad);
   Object.entries(row.rooms).forEach(([name, ok]) => {
     const pad = roomPads[name];
-    if (!pad) return;
-    pad.material.color.copy(ok ? open : shut);
-    pad.material.opacity = ok ? 0.16 : 0.42;
+    if (pad) {
+      pad.material.color.copy(ok ? open : shut);
+      pad.material.opacity = ok ? 0.14 : 0.5;
+    }
+    // Closed rooms empty out. Accessibility as a continuous spectrum is
+    // easier to feel when the furniture in a room you can no longer
+    // enter stops being there.
+    (roomContents[name] || []).forEach(m => { m.visible = ok; });
   });
+  setInstanceRooms(new Set(
+    Object.entries(row.rooms).filter(([, ok]) => !ok).map(([n]) => n)));
+
+  const rad = (row.width_in * 0.0254) / 2;
+  probeRing.scale.setScalar(rad / 1.0);
+  const sp = D.spawn;
+  probeRing.position.copy(v3(sp[0], sp[1], 0.03));
+  probeRing.material.color.set(
+    row.width_in >= 32 ? TOK.bad : row.width_in >= 28 ? TOK.warn : TOK.ok);
   const sl = el("widthslider");
   if (sl && Number(sl.value) !== widthIdx) sl.value = String(widthIdx);
   el("widthval").textContent = row.width_in.toFixed(0) + "\u2033";
@@ -746,9 +815,9 @@ const SPEED = { walker: 1.35, wheelchair: 1.05, cane: 0.85, robot: 1.0 };
    reads as "it barely moved". Speed is scaled so the whole journey
    completes with time to spare, and the ratio between profiles is
    preserved so the wheelchair still visibly trails the walker. */
-function paceFor(profile, lengthM, dur, delay) {
+function paceFor(profile, lengthM, dur, delay, frac) {
   const base = SPEED[profile.body] || 1.2;
-  const window = Math.max((dur - (delay || 0)) * 0.68, 1);
+  const window = Math.max((dur - (delay || 0)) * (frac || 0.68), 1);
   const needed = lengthM / window;
   return Math.max(base, Math.min(needed, base * 5.5));
 }
@@ -1061,7 +1130,7 @@ let userCam = false;
    guided sequence entirely: every issue at once, free camera, and a
    list you can work down. Selecting one flies the camera to it. */
 const ISSUES = D.issues || [];
-let inspecting = false, isFilter = "all", isSel = null;
+let inspecting = false, isFilter = "all", isSel = null, isSort = "phase";
 
 const VCOL = () => ({ move: TOK.ok, reconfigure: TOK.warn,
                       build: TOK.bad, combined: TOK.bad });
@@ -1136,11 +1205,18 @@ const PHASES = [
 ];
 
 function renderIssueList() {
-  const shown = ISSUES.map((it, i) => ({ it, i })).filter(({ it }) =>
+  let shown = ISSUES.map((it, i) => ({ it, i })).filter(({ it }) =>
     isFilter === "all" ? true
       : isFilter === "move" ? it.cost === 0
       : isFilter === "combined" ? it.verdict === "combined"
       : it.cost > 0 && it.verdict !== "combined");
+  if (isSort === "roi") {
+    // Cheapest square metre first. "What is worth doing" rather than
+    // "what is cheapest", which are different lists.
+    shown = shown.slice().sort((a, b) =>
+      (a.it.cost_per_m2 === null ? 1e9 : a.it.cost_per_m2) -
+      (b.it.cost_per_m2 === null ? 1e9 : b.it.cost_per_m2));
+  }
   const paid = ISSUES.filter(i => i.cost > 0);
   const free = ISSUES.filter(i => i.cost === 0);
   el("istotal").textContent =
@@ -1162,7 +1238,9 @@ function renderIssueList() {
     <li><button data-i="${i}" class="${isSel === i ? "sel" : ""}">
       <span class="r1">
         <em class="v-${it.verdict}">${VLABEL[it.verdict] || it.verdict}</em>
-        <strong>${money(it.cost)}</strong>
+        <strong>${money(it.cost)}${
+          it.cost_per_m2 ? ` <i class="roi">$${it.cost_per_m2}/m²</i>` : ""
+        }</strong>
       </span>
       <span class="r2">${it.detail}</span>
       <span class="r3">${it.room ? it.room + " · " : ""}${who(it)}</span>
@@ -1171,6 +1249,14 @@ function renderIssueList() {
     el("islist").innerHTML =
       `<li class="isempty">Nothing in this category.<br>` +
       `Try <strong>All</strong>.</li>`;
+    return;
+  }
+  if (isSort === "roi") {
+    el("islist").innerHTML =
+      `<li class="isphase">Best value first<span>cost per m² returned` +
+      `</span></li>` + shown.map(row).join("");
+    el("islist").querySelectorAll("button[data-i]").forEach(b =>
+      b.addEventListener("click", () => selectIssue(Number(b.dataset.i))));
     return;
   }
   el("islist").innerHTML = PHASES.map(ph => {
@@ -1251,6 +1337,83 @@ function setInspect(on) {
   }
 }
 
+/* ---------- autonomous remediation ---------- */
+/* The optimiser already decides what to change and has measured what
+   that returns. This makes the loop visible: the body stops, the
+   building is altered, the same body completes the same journey. The
+   geometry that moves is the geometry the fix actually touches -- wall
+   meshes intersecting the applied disk are retracted away from its
+   centre, so the opening widens rather than a marker appearing. */
+let remedied = false, remedyAnim = 0;
+const remedyTargets = [];
+
+function findRemedyTargets() {
+  remedyTargets.length = 0;
+  (OPT.chosen || []).forEach(fx => {
+    const ap = fx.apply || {};
+    if (ap.kind !== "free_disk") return;
+    const cx = fx.pos[0], cy = fx.pos[1], r = ap.radius_m || 0.8;
+    SOLID_MESHES.forEach(m => {
+      const s = m.userData.solid;
+      if (!s || s.kind !== "wall") return;
+      // Nearest point of the wall's footprint to the fix centre.
+      const nx = Math.max(s.x0, Math.min(cx, s.x1));
+      const ny = Math.max(s.y0, Math.min(cy, s.y1));
+      if (Math.hypot(nx - cx, ny - cy) > r) return;
+      const alongY = (s.y1 - s.y0) >= (s.x1 - s.x0);
+      const len = alongY ? s.y1 - s.y0 : s.x1 - s.x0;
+      const near = alongY ? (Math.abs(s.y0 - cy) < Math.abs(s.y1 - cy))
+                          : (Math.abs(s.x0 - cx) < Math.abs(s.x1 - cx));
+      // How much has to come off this end for the disk to be clear.
+      const cut = Math.min(len * 0.6,
+        r - Math.abs(alongY ? (near ? s.y0 : s.y1) - cy
+                            : (near ? s.x0 : s.x1) - cx) + 0.05);
+      if (cut <= 0.02) return;
+      remedyTargets.push({ mesh: m, alongY, len, near, cut,
+                           basePos: m.position.clone(),
+                           baseScale: m.scale.clone() });
+    });
+  });
+}
+
+function applyRemedy(t) {
+  // t: 0 = as built, 1 = fully remediated.
+  remedyTargets.forEach(o => {
+    const f = 1 - (o.cut / o.len) * t;
+    const shift = (o.len * (1 - f)) / 2 * (o.near ? 1 : -1);
+    if (o.alongY) {
+      o.mesh.scale.z = o.baseScale.z * f;
+      o.mesh.position.z = o.basePos.z + shift;
+    } else {
+      o.mesh.scale.x = o.baseScale.x * f;
+      o.mesh.position.x = o.basePos.x + shift;
+    }
+  });
+}
+
+function resetRemedy() {
+  remedied = false; remedyAnim = 0;
+  remedyTargets.forEach(o => {
+    o.mesh.scale.copy(o.baseScale);
+    o.mesh.position.copy(o.basePos);
+  });
+  el("remedy").hidden = true;
+  el("remedy").classList.remove("done");
+  el("remedystate").textContent = "";
+}
+
+function triggerRemedy() {
+  if (remedied) return;
+  remedied = true;
+  const fx = (OPT.chosen || [])[0];
+  el("remedystate").textContent = fx
+    ? `${fx.detail} · $${fx.cost.toLocaleString()}` : "";
+  el("remedy").classList.add("done");
+  el("remedybtn").textContent = "Remediated";
+  el("live").textContent =
+    "Remediation applied. The wheelchair completes the route.";
+}
+
 /* ---------- scene script ---------- */
 const P = {};
 D.profiles.forEach(p => P[p.name] = p);
@@ -1267,7 +1430,7 @@ function journeyOf(pname, goal) { return P[pname].journeys[goal]; }
 
 const SCENES = [
   {
-    id: "establish", dur: 9.0, kicker: "The building",
+    id: "establish", dur: 7.0, kicker: "The building",
     cap: () => {
       // Built from the data. Hard-coding the room list and the defect
       // count meant the opening line still said "eight defects" and
@@ -1293,7 +1456,7 @@ const SCENES = [
     }
   },
   {
-    id: "walker", dur: 13.0, kicker: "Walking adult", profile: "baseline_walking",
+    id: "walker", dur: 11.0, kicker: "Walking adult", profile: "baseline_walking",
     cap: `A walking adult reaches <em>every room in the building</em> —
           ${n0(P.baseline_walking.reach_m2, 0)} m², 100% of the floor.
           The community room, the gallery, the WC: all connected.
@@ -1310,7 +1473,7 @@ const SCENES = [
     }
   },
   {
-    id: "chair-room", dur: 17.0, kicker: "Wheelchair · community room",
+    id: "chair-room", dur: 15.0, kicker: "Wheelchair · community room",
     profile: "wheelchair",
     cap: () => {
       const b = (journeyOf("wheelchair", "community_room").barriers || [])[0];
@@ -1339,7 +1502,7 @@ const SCENES = [
     }
   },
   {
-    id: "eye", dur: 14.0, kicker: "At eye level", profile: "wheelchair",
+    id: "eye", dur: 13.0, kicker: "At eye level", profile: "wheelchair",
     cap: `The same approach, from the chair. <em>Nothing about this view is
           unusual until it stops.</em> That is the point: the failure is not
           visible from the corridor, it is not visible on the drawing, and it
@@ -1364,7 +1527,7 @@ const SCENES = [
     }
   },
   {
-    id: "width", dur: 20.0, kicker: "Where does it close?",
+    id: "width", dur: 18.0, kicker: "Where does it close?",
     cap: `Drag the slider. Every room is re-tested as the body widens, and
           they switch off one at a time. <em>At 28 inches the community room
           and the accessible WC go dark; at 32 — a standard powered
@@ -1375,6 +1538,10 @@ const SCENES = [
     enter() {
       hideAgents(); clearMarkers(); decalGroup.visible = false;
       roomGroup.visible = true; setWallCut(0.16);
+      if (!roomContents.__indexed) {
+        indexRoomContents(); roomContents.__indexed = true;
+      }
+      probeRing.visible = true;
       el("widthcard").hidden = false;
       applyWidth(0);
       lookAt(BW / 2, -4, 34, BW / 2, BH / 2, 0);
@@ -1390,7 +1557,69 @@ const SCENES = [
     }
   },
   {
-    id: "islands", dur: 13.0, kicker: "The finding",
+    id: "remediate", dur: 26.0, kicker: "Fix it, and walk it again",
+    profile: "wheelchair", remediable: true,
+    // Each leg gets about a third of the scene: walk up, a beat at the
+    // door for somebody to press the button, then walk through.
+    pace: 0.30,
+    cap: () => {
+      const fx = (OPT.chosen || [])[0];
+      const wc = P.wheelchair;
+      return fx ? `The wheelchair stops at the 28-inch door. The optimiser
+        already knows which single change buys the most, and has measured
+        it by rebuilding the building and re-running the whole population.
+        <em>Press the button.</em> The opening widens, and the same body
+        walks the same journey through — ${wc.pct}% of the floor becomes
+        <em>${wc.after_pct}%</em>, for $${fx.cost.toLocaleString()}.`
+        : "No repair improved measured coverage.";
+    },
+    stat: () => {
+      const fx = (OPT.chosen || [])[0];
+      const roi = (D.issues || []).find(i => fx && i.id === fx.id);
+      return fx ? [(roi && roi.cost_per_m2 ? "$" + roi.cost_per_m2 + "/m²"
+                    : "$" + fx.cost.toLocaleString()),
+                   "to return " + (roi ? roi.recovered_m2 : "—") +
+                   " m² to a wheelchair"] : ["—", ""];
+    },
+    walk: [["wheelchair", "community_room", 0]],
+    enter() {
+      hideAgents(); clearMarkers(); decalGroup.visible = false;
+      cpGroup.visible = false; roomGroup.visible = false;
+      surfGroup.visible = false; setWallCut(0.30);
+      findRemedyTargets();
+      resetRemedy();
+      this._stuckAt = null;
+      el("remedybtn").textContent = "Autonomously remediate";
+    },
+    tick(t) {
+      // Offer the button once the body has actually stopped, and take
+      // the decision itself if nobody is driving -- an unattended demo
+      // still has to complete the loop.
+      const st = P.wheelchair._walks && P.wheelchair._walks.community_room;
+      const stuck = st && st.done && !st.swapped;
+      if (stuck && this._stuckAt == null) this._stuckAt = t;
+      if (!stuck && !remedied) this._stuckAt = null;
+      el("remedy").hidden = !(stuck || remedied);
+      // Hold the beat so a presenter can press it; take the decision
+      // ourselves only if nobody does, so an unattended loop completes.
+      if (stuck && this._stuckAt != null && t - this._stuckAt > 4.0) {
+        triggerRemedy();
+      }
+      if (remedied && remedyAnim < 1) {
+        remedyAnim = Math.min(1, remedyAnim + 0.02);
+        applyRemedy(remedyAnim);
+      }
+      follow("wheelchair", t, 9, -5, 6);
+    },
+    onStop(pname, goal) {
+      if (remedied) return;
+      (journeyOf(pname, goal).barriers || []).slice(0, 1).forEach(b =>
+        addMarker(b.pos[0], b.pos[1], b.pos[2],
+          `${n0(b.aperture_in)}\u2033 clear`, "needs 32\u2033", TOK.bad));
+    }
+  },
+  {
+    id: "islands", dur: 12.0, kicker: "The finding",
     cap: `Those two regions are <em>geometrically flawless inside</em> — wide,
           dead flat, with turning circles to spare. They are also completely
           unreachable in a wheelchair. <em>No clearance-based audit flags a room
@@ -1411,7 +1640,7 @@ const SCENES = [
     }
   },
   {
-    id: "cane", dur: 12.0, kicker: "Cane user · WC", profile: "vision_impaired_cane",
+    id: "cane", dur: 10.0, kicker: "Cane user · WC", profile: "vision_impaired_cane",
     cap: `A cane sweeps a 42-inch arc — <em>wider than a wheelchair</em>. It
           clears the corridor, then meets a bulkhead dropped to 1 950 mm over
           the accessible WC door. <em>The WC excludes two different people for
@@ -1432,7 +1661,7 @@ const SCENES = [
     }
   },
   {
-    id: "robot", dur: 11.0, kicker: "Delivery robot",
+    id: "robot", dur: 9.0, kicker: "Delivery robot",
     profile: "sidewalk_delivery_robot",
     cap: `A 26-inch delivery robot goes <em>straight through the door that
           excluded the wheelchair</em>. It is narrow enough. The same building
@@ -1445,7 +1674,7 @@ const SCENES = [
     tick(t) { follow("sidewalk_delivery_robot", t, 9, -5, 6); }
   },
   {
-    id: "materials", dur: 15.0, kicker: "What the floor is made of",
+    id: "materials", dur: 13.0, kicker: "What the floor is made of",
     cap: `Geometry is not the only rule. <em>ADA 302 governs the floor
           itself</em>, and pile over 13 mm fails it. The auditorium is
           carpeted at 22 mm: level, wide, generous, compliant on every
@@ -1471,7 +1700,7 @@ const SCENES = [
     }
   },
   {
-    id: "choke", dur: 24.0, kicker: "Every blockage, priced",
+    id: "choke", dur: 20.0, kicker: "Every blockage, priced",
     cap: `<em>Click any marker.</em> Each blockage carries a verdict: move
           the furniture and it costs nothing; re-lay fixed seating or widen
           an opening and it costs money; or — the case a two-way split
@@ -1507,7 +1736,7 @@ const SCENES = [
     }
   },
   {
-    id: "fix", dur: 13.0, kicker: "Cheapest repair",
+    id: "fix", dur: 12.0, kicker: "Cheapest repair",
     cap: chosen ? `Every candidate repair is scored by <em>rebuilding the
           building and re-running the whole population through it</em>. With
           $${OPT.budget_usd.toLocaleString()} the optimum is
@@ -1541,7 +1770,7 @@ const SCENES = [
     }
   },
   {
-    id: "truth", dur: 11.0, kicker: "Scored against truth",
+    id: "truth", dur: 9.0, kicker: "Scored against truth",
     cap: `Because the building is generated, an answer key exists.
           <em>${REC.planted} defects planted, ${REC.detected} recovered</em> by
           an analysis that was never told where to look — it found them by
@@ -1606,7 +1835,7 @@ function resetWalks(sc) {
     const p = P[pname], j = p.journeys[goal];
     p._walks[goal] = {
       goal, delay: delay || 0, j, len: pathLength(j.path), s: 0,
-      done: false, drawn: false, sample: null
+      done: false, drawn: false, sample: null, swapped: false
     };
   });
 }
@@ -1617,8 +1846,23 @@ function stepWalks(sc, t, dt) {
     const p = P[pname], st = p._walks && p._walks[goal];
     if (!st) return;
     if (t < st.delay) { if (!p._active) p.agent.visible = false; return; }
+    // Once the building has been altered, the same body switches to the
+    // route through the remediated world and walks on from where it
+    // stopped. The route is the one the analysis produced for the fixed
+    // building, not an animation of one.
+    if (remedied && !st.swapped && sc.remediable) {
+      const aj = p.after_journeys && p.after_journeys[goal];
+      if (aj && aj.arrived && aj.path.length > 1) {
+        st.j = aj;
+        st.len = pathLength(aj.path);
+        st.done = false;
+        st.swapped = true;
+        st.drawn = false;
+      }
+    }
     if (!st.drawn) { st.drawn = true; drawRoute(st.j.path, p.c, st.j.arrived); }
-    const sp = paceFor(p, st.len, SCENES[sceneI].dur, st.delay);
+    const sp = paceFor(p, st.len, SCENES[sceneI].dur, st.delay,
+                       SCENES[sceneI].pace);
     if (!st.done) st.s += dt * sp;
     if (st.s >= st.len) {
       st.s = st.len;
@@ -1703,6 +1947,7 @@ function applyScene(i) {
     wc.querySelector("h3").textContent = "Body width";
     wc.querySelector(".wrow").hidden = false;
   }
+  if (s.id !== "remediate") { resetRemedy(); }
   if (s.id !== "choke") {
     cpGroup.visible = false;
     el("cpsum").hidden = true;
@@ -1711,6 +1956,12 @@ function applyScene(i) {
   if (!s.slider) {
     el("widthcard").hidden = true;
     roomGroup.visible = false;
+    probeRing.visible = false;
+    // Anything hidden by the slider comes back.
+    Object.values(roomContents).forEach(list => {
+      if (Array.isArray(list)) list.forEach(m => { m.visible = true; });
+    });
+    setInstanceRooms(new Set());
   }
   if (s.enter) s.enter();
   syncNav();
@@ -1847,8 +2098,17 @@ function syncNav() {
       `/${SCENES.length}`;
   }
 }
+el("remedybtn").addEventListener("click", () => {
+  triggerRemedy();
+  clearMarkers();
+});
 el("navnext").addEventListener("click", () => step(1));
 el("navprev").addEventListener("click", () => step(-1));
+el("issort").addEventListener("click", () => {
+  isSort = isSort === "roi" ? "phase" : "roi";
+  el("issort").classList.toggle("on", isSort === "roi");
+  renderIssueList();
+});
 el("iscopy").addEventListener("click", async () => {
   // A worklist you cannot get out of the page is a demo, not a tool.
   const esc = v => `"${String(v).replace(/"/g, '""')}"`;
