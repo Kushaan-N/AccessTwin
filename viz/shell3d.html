@@ -115,6 +115,35 @@
   font-variant-numeric:tabular-nums;font-weight:600}
 .chip.on{color:var(--ink);background:var(--panel);border-color:var(--rule)}
 
+.cpsum{position:absolute;left:12px;top:12px;display:flex;gap:8px;
+  flex-wrap:wrap;pointer-events:none;z-index:4}
+.cpsum b{font-family:var(--mono);font-size:11.5px;font-weight:600;
+  background:var(--sheet);border:1px solid var(--rule);border-radius:3px;
+  padding:5px 9px;color:var(--ink)}
+.cpsum b i{font-style:normal;color:var(--ink-3);font-weight:400}
+
+.cppop{position:absolute;z-index:6;width:288px;background:var(--sheet);
+  border:1px solid var(--rule);border-radius:4px;padding:12px 13px 11px;
+  box-shadow:0 10px 30px rgba(0,0,0,.36)}
+.cppop h4{margin:5px 0 5px;font-size:14.5px;line-height:1.3}
+.cppop p{margin:0 0 8px;font-size:12.5px;color:var(--ink-2);line-height:1.45}
+.cppop .cpnote{font-size:10.5px;color:var(--ink-3);margin:8px 0 0;
+  border-top:1px solid var(--rule-soft);padding-top:7px}
+.cppop dl{margin:0;display:grid;grid-template-columns:auto 1fr;
+  gap:3px 10px;font-size:12px}
+.cppop dt{color:var(--ink-3);white-space:nowrap}
+.cppop dd{margin:0;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.cpv{font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;font-weight:600;display:inline-block;
+  padding:3px 7px;border-radius:3px}
+.cpv.move{background:rgba(41,160,144,.18);color:var(--ok)}
+.cpv.reconfigure{background:rgba(190,138,48,.18);color:var(--warn)}
+.cpv.build{background:rgba(208,71,94,.16);color:var(--bad)}
+.cpv.combined{background:rgba(208,71,94,.16);color:var(--bad)}
+.cpx{position:absolute;top:6px;right:6px;background:none;border:0;
+  font-size:17px;line-height:1;color:var(--ink-3);padding:3px 6px;cursor:pointer}
+.cpx:hover{color:var(--ink)}
+
 .legend{display:flex;flex-direction:column;gap:5px}
 .wrow{display:flex;align-items:center;gap:9px;margin-bottom:9px}
 .wrow input{flex:1;accent-color:var(--accent);cursor:pointer}
@@ -152,6 +181,17 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--panel);
   <div class="body">
     <div class="viewport">
       <div id="stage"></div>
+      <div id="cpsum" class="cpsum" hidden></div>
+      <div id="cppop" class="cppop" hidden role="dialog"
+           aria-labelledby="cptitle" tabindex="-1">
+        <button id="cpclose" class="cpx" aria-label="Close">&times;</button>
+        <div class="cpv" id="cpverdict"></div>
+        <h4 id="cptitle"></h4>
+        <p id="cpdetail"></p>
+        <dl id="cpfacts"></dl>
+        <p class="cpnote">Cost is an illustrative order-of-magnitude
+          figure for demonstration, not a quote.</p>
+      </div>
       <div class="progress"><i id="bar"></i></div>
       <div class="block">
         <div class="no" id="sceneno">01 / 11</div>
