@@ -10,6 +10,7 @@ IN_PER_M = 39.3701
 
 class ViolationType(str, Enum):
     CLEARANCE = "clearance_width"
+    SURFACE = "floor_surface"
     SLOPE = "slope_gradient"
     TURNING_RADIUS = "turning_radius"
     HEAD_CLEARANCE = "head_clearance"
@@ -31,6 +32,13 @@ class MobilityAgentProfile:
     max_step_in: float = 0.5
     head_clearance_in: Optional[float] = None
     cane_sweep_arc_in: Optional[float] = None
+    # --- floor-surface tolerances (ADA 302) ---
+    # Wheels care about what they roll on; feet mostly do not. This is
+    # the axis on which a cane user out-performs a wheelchair.
+    needs_firm: bool = False
+    max_pile_mm: float = 50.0
+    max_opening_mm: float = 60.0
+    max_rolling: float = 1.0
 
     @property
     def required_clearance_in(self) -> float:
@@ -53,17 +61,23 @@ class MobilityAgentProfile:
 
 WHEELCHAIR = MobilityAgentProfile(
     name="wheelchair", width_in=32.0, turning_radius_in=60.0,
-    max_slope_ratio=1 / 12, max_step_in=0.5)
+    max_slope_ratio=1 / 12, max_step_in=0.5,
+    needs_firm=True, max_pile_mm=13.0, max_opening_mm=13.0,
+    max_rolling=0.35)
 CANE_SWEEP = MobilityAgentProfile(
     name="vision_impaired_cane", width_in=24.0, turning_radius_in=36.0,
     max_slope_ratio=1 / 10, max_step_in=6.0,
-    head_clearance_in=80.0, cane_sweep_arc_in=42.0)
+    head_clearance_in=80.0, cane_sweep_arc_in=42.0,
+    needs_firm=False, max_pile_mm=30.0, max_opening_mm=40.0,
+    max_rolling=0.95)
 BASELINE = MobilityAgentProfile(
     name="baseline_walking", width_in=20.0, turning_radius_in=18.0,
     max_slope_ratio=1 / 4, max_step_in=16.0)
 DELIVERY_ROBOT = MobilityAgentProfile(
     name="sidewalk_delivery_robot", width_in=26.0, turning_radius_in=30.0,
-    max_slope_ratio=1 / 8, max_step_in=2.0)
+    max_slope_ratio=1 / 8, max_step_in=2.0,
+    needs_firm=True, max_pile_mm=8.0, max_opening_mm=10.0,
+    max_rolling=0.28)
 
 ALL_PROFILES = [BASELINE, WHEELCHAIR, CANE_SWEEP, DELIVERY_ROBOT]
 
@@ -74,7 +88,64 @@ ADA_CITATIONS = {
     ViolationType.STEP_HEIGHT: "ADA 2010 §303.2 — changes in level max 1/2in",
     ViolationType.HEAD_CLEARANCE: "ADA 2010 §307.4 — 80in vertical clearance",
     ViolationType.UNREACHABLE: "Derived — connectivity, no direct ADA analogue",
+    ViolationType.SURFACE: "ADA 2010 §302 — floor surfaces firm, stable and "
+                           "slip-resistant; §302.2 pile ≤ 1/2in; "
+                           "§302.3 openings ≤ 1/2in",
 }
+
+
+# ======================================================================
+# floor surfaces
+# ======================================================================
+
+@dataclass(frozen=True)
+class Surface:
+    """A floor finish, described by the properties that decide who can
+    cross it rather than by a list of who cannot.
+
+    ADA 302 is about material, not geometry: a corridor can be wide,
+    level and perfectly compliant on every dimension and still be
+    impassable because somebody laid deep pile carpet or a drainage
+    grating across it. Nothing in a clearance-and-slope analysis sees
+    that -- which is exactly why it belongs here.
+    """
+    name: str
+    label: str
+    firm: bool           # stable and firm underfoot (302.1)
+    pile_mm: float       # carpet pile height (302.2)
+    opening_mm: float    # grating slot / joint width (302.3)
+    rolling: float       # rolling resistance, 0 = glass, 1 = impossible
+    color: str           # for the floor-material overlay
+
+
+SURFACES = {
+    s.name: s for s in [
+        Surface("concrete", "Sealed concrete", True, 0, 3, 0.05, "#8C97A0"),
+        Surface("tile", "Ceramic tile", True, 0, 4, 0.05, "#96A2AB"),
+        Surface("timber", "Timber boards", True, 0, 4, 0.07, "#A8804C"),
+        Surface("carpet_low", "Low-pile carpet", True, 8, 0, 0.22, "#6E7F8C"),
+        Surface("carpet_deep", "Deep-pile carpet", True, 22, 0, 0.55,
+                "#7A5A6B"),
+        Surface("grating", "Metal grating", True, 0, 22, 0.30, "#5F6E78"),
+        Surface("gravel", "Loose gravel", False, 0, 0, 0.85, "#8A7F63"),
+        Surface("cobble", "Cobble setts", True, 0, 18, 0.60, "#6B6A63"),
+        Surface("tactile", "Tactile paving", True, 0, 3, 0.12, "#B39A3E"),
+    ]
+}
+DEFAULT_SURFACE = "concrete"
+
+
+def surface_ok(p: "MobilityAgentProfile", s: Surface) -> tuple[bool, str]:
+    """Can this body cross this finish, and if not, which rule fails."""
+    if p.needs_firm and not s.firm:
+        return False, "not firm and stable"
+    if s.pile_mm > p.max_pile_mm:
+        return False, f"{s.pile_mm:.0f} mm pile"
+    if s.opening_mm > p.max_opening_mm:
+        return False, f"{s.opening_mm:.0f} mm openings"
+    if s.rolling > p.max_rolling:
+        return False, "rolling resistance"
+    return True, ""
 
 
 @dataclass
