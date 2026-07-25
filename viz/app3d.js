@@ -37,8 +37,27 @@ const v3 = (x, y, z) => new THREE.Vector3(x, z, y);   // world -> scene
 
 /* ---------- renderer ---------- */
 const stage = document.getElementById("stage");
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+const el0 = id => document.getElementById(id);
+
+/* A projector or a locked-down laptop that cannot do WebGL would
+   otherwise show a black rectangle and nothing else. Fail to the text
+   findings, which carry every number the 3D view does. */
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  if (!renderer.getContext()) throw new Error("no context");
+} catch (err) {
+  if (el0("boot")) el0("boot").hidden = true;
+  if (el0("nogl")) el0("nogl").hidden = false;
+  const det = el0("findings");
+  if (det) det.open = true;
+  console.error("WebGL unavailable", err);
+  return;
+}
+/* On a 4K projector a full-resolution buffer with 4096 shadows will
+   crawl. Start conservative and step down further if frames are slow. */
+let pixelCap = Math.min(2, devicePixelRatio || 1);
+renderer.setPixelRatio(pixelCap);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -64,7 +83,8 @@ scene.add(hemi);
 const key = new THREE.DirectionalLight(0xfff4e6, 2.5);
 key.position.set(18, 26, -6);
 key.castShadow = true;
-key.shadow.mapSize.set(4096, 4096);
+key.shadow.mapSize.set(devicePixelRatio > 1.5 ? 2048 : 4096,
+                      devicePixelRatio > 1.5 ? 2048 : 4096);
 key.shadow.camera.near = 1;
 key.shadow.camera.far = 90;
 const SH = 26;
@@ -1382,11 +1402,26 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 
+let slowFrames = 0;
+
 function frame(ts) {
   requestAnimationFrame(frame);
   if (!last) last = ts;
-  const dt = Math.min(0.05, (ts - last) / 1000);
+  const raw = (ts - last) / 1000;
+  const dt = Math.min(0.05, raw);
   last = ts; clock += dt;
+
+  // Sustained slow frames: shed pixels rather than drop the walkthrough
+  // to a slideshow. Once only -- oscillating between two resolutions
+  // looks worse than either.
+  if (raw > 0.045 && pixelCap > 1) {
+    if (++slowFrames > 90) {
+      pixelCap = 1;
+      renderer.setPixelRatio(1);
+      resize();
+      slowFrames = 0;
+    }
+  } else if (slowFrames > 0) { slowFrames--; }
 
   const s = SCENES[sceneI];
   if (playing) {
@@ -1450,8 +1485,28 @@ addEventListener("keydown", e => {
   if (e.key === "ArrowLeft") { e.preventDefault(); goto(sceneI - 1); }
   if (e.key.toLowerCase() === "p") { el("play").click(); }
   if (e.key === "Escape") hideChokepoint();
+  // Number keys jump straight to a scene. Three minutes is longer than
+  // most demo slots, and hunting with the arrow keys on stage is worse
+  // than not showing the scene at all.
+  if (/^[1-9]$/.test(e.key)) {
+    e.preventDefault();
+    goto(Number(e.key) - 1);
+  }
+  if (e.key === "0") { e.preventDefault(); goto(9); }
 });
 addEventListener("resize", resize);
+
+/* requestAnimationFrame is suspended entirely in a background tab, so a
+   presenter who alt-tabs away comes back to a walkthrough frozen
+   mid-scene. Restart the clock on return rather than letting one
+   enormous delta jump the scene. */
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    last = 0;
+    camState.pos.copy(camGoal.pos);
+    camState.tgt.copy(camGoal.tgt);
+  }
+});
 const mo = () => { tokens(); buildMaterials(); applyEnv();
   buildRoomLabels(); applyScene(sceneI); };
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", mo);
@@ -1519,4 +1574,8 @@ el("meta").textContent =
 
 resize();
 goto(0);
+// One synchronous draw before the spinner goes, so the first thing the
+// viewer sees is the building rather than a flash of empty stage.
+renderer.render(scene, camera);
+if (el0("boot")) el0("boot").hidden = true;
 requestAnimationFrame(frame);
