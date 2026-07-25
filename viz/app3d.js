@@ -1894,42 +1894,19 @@ const SCENES = [
 
 function hideAgents() { D.profiles.forEach(p => p.agent.visible = false); }
 
-/* Eye level. Camera at the body's own head height, just behind it,
-   looking where it is going -- so the doorway that stops the chair
-   arrives at the viewer the way it arrives at the person. */
-function eyeLevel(pname, back) {
-  const p = P[pname], st = p._active;
-  if (!st || !st.sample) return;
-  const s = st.sample;
-  const eye = (p.agent.userData.parts.eyeH || 1.5);
-  const dx = s.dir[0], dy = s.dir[1];
-  const b = back || 2.4;
-  // Just above and behind the head rather than inside it: close enough
-  // to be their view, far enough that the body reads as a body.
-  lookAt(s.p[0] - dx * b, s.p[1] - dy * b, s.p[2] + eye + 0.42,
-         s.p[0] + dx * 9, s.p[1] + dy * 9, s.p[2] + eye * 0.80);
-}
 
-/* When a body is stopped, hold its own eye height for a moment -- a
-   1:12 failure seen from above is a diagram, seen from the seat it is a
-   wall -- and then pull back to a shot that actually contains the thing
-   that stopped it.
+/* When a body is stopped, cut immediately to a shot composed around what
+   stopped it: back along the approach, offset to one side so the opening
+   reads as an opening, and high enough to hold the measurement callout.
 
-   The eye-level shot alone was the bug: it sits 1.9 m behind a seated
-   rider looking level, so the callout hovering 2.75 m over the barrier
-   is above the top of frame and the viewer is told a door is too narrow
-   while looking at blank wall. The second shot is composed around the
-   barrier: back along the approach, offset to one side so the opening
-   reads as an opening, and high enough to keep the label in view. */
-// Seconds spent at the stopped body's own eye level before pulling out to
-// the shot that shows what stopped it. This used to be 1.3s and the ease
-// out of it 1.1s, so the composed wide shot -- the one carrying the
-// measurement callout -- did not exist until 2.4s after the body stopped.
-// Measured against the scene clock that left 1.4s of readable frame in the
-// wheelchair scene and 0.5s in the cane scene, which is not reading time.
-const POV_HOLD = 0.5;
-const POV_EASE = 0.65;
-
+   This used to open on the rider's own eye level and pull back from it.
+   That shot was wrong twice over. It sits 1.9 m behind a seated rider
+   looking level, so the callout hovering 2.75 m above the barrier is off
+   the top of frame -- the viewer is told a door is too narrow while
+   looking at blank wall. And the time it costs is taken from the only
+   part of the scene that carries the number: at 1.3s of hold plus 1.1s
+   of ease the composed shot did not exist until 2.4s after the stop,
+   which left 1.4s of readable frame here and 0.5s in the cane scene. */
 function barrierOf(pname, goal) {
   const j = P[pname].journeys[goal];
   return j && j.barriers && j.barriers[0];
@@ -1943,8 +1920,6 @@ function followStopped(pname, t, back, side, up, goal) {
     return;
   }
   if (st.stoppedAt == null) st.stoppedAt = t;
-  const since = t - st.stoppedAt;
-  if (since < POV_HOLD) { eyeLevel(pname, 1.9); return; }
 
   const b = barrierOf(pname, goal || st.goal);
   const s = st.sample;
@@ -1952,11 +1927,17 @@ function followStopped(pname, t, back, side, up, goal) {
   // Midpoint of body and barrier, framed from the side.
   const mx = (s.p[0] + b.pos[0]) / 2, my = (s.p[1] + b.pos[1]) / 2;
   const dx = s.dir[0], dy = s.dir[1];
-  const ease = Math.min(1, (since - POV_HOLD) / POV_EASE);
-  lookAt(mx - dx * (5.6 * ease + 1.2) + dy * 4.2 * ease,
-         my - dy * (5.6 * ease + 1.2) - dx * 4.2 * ease,
-         1.7 + 2.4 * ease,
-         mx, my, 1.5);
+  // A hard cut on the frame the body stops, not a move into position.
+  // This held the rider's own eye level for half a second and then eased
+  // out over another 0.65s, and every one of those frames was spent on a
+  // shot that does not contain the measurement. The callout is the point
+  // of the scene, so the camera is already there when it appears.
+  // snap only on the first frame: the goal barely moves afterwards, so
+  // later frames leave the camera where the cut put it while still
+  // letting the normal easing absorb the body's settle-back.
+  lookAt(mx - dx * 6.8 + dy * 4.2, my - dy * 6.8 - dx * 4.2, 4.1,
+         mx, my, 1.5, !st.snapped);
+  st.snapped = true;
 }
 
 /* Follow the agent that is currently walking, from behind and above. */
@@ -1985,7 +1966,7 @@ function resetWalks(sc) {
     p._walks[goal] = {
       goal, delay: delay || 0, j, len: pathLength(j.path), s: 0,
       done: false, drawn: false, sample: null, swapped: false,
-      stoppedAt: null
+      stoppedAt: null, snapped: false
     };
   });
 }
