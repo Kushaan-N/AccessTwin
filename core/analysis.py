@@ -473,6 +473,167 @@ def propose_fixes(grid: NavGrid, free, height, cell, spawn, goals,
     return cands
 
 
+def _score_profiles(free, height, cell, spawn, goals, ceiling, surface,
+                    surface_order, base_area) -> dict:
+    """Per-profile outcome only: four bodies, no population.
+
+    _score() also samples a mobility population, which costs sixty
+    analyse() passes over a half-million-cell grid. Candidate selection
+    reads none of that -- it needs area and destinations per named
+    profile and nothing else -- so paying for it once per candidate was
+    the bulk of the frontier's runtime.
+    """
+    g = NavGrid(free, height, cell, ceiling=ceiling, surface=surface,
+                surface_order=surface_order)
+    named = {}
+    for p in ALL_PROFILES:
+        st = g.analyse(p, spawn, min_island_cells=10 ** 9)
+        named[p.name] = {
+            "pct": round(100.0 * st["reachable_m2"] / max(base_area, 1e-9), 1),
+            "goals": sum(1 for gl in goals.values()
+                         if g.reaches(p, spawn, gl)),
+        }
+    return {"by_profile": named}
+
+
+def budget_frontier(free, height, cell, spawn, goals, budgets, seed=7,
+                    pop_n=90, furniture=None, ceiling=None,
+                    surface_order=None, surface=None) -> dict:
+    """What to buy at each budget, chosen by knapsack and then verified.
+
+    The greedy optimiser answers "spend this and get that". This answers
+    the planner's question instead: for any budget, which combination of
+    repairs returns the most floor.
+
+    Two passes, because one would be a lie. A 0/1 knapsack over measured
+    per-repair values assumes the repairs are independent, and they are
+    not -- two barriers on the same blocked route return nothing until
+    both are done. So the knapsack proposes a set, and then the set is
+    APPLIED to the building and re-measured. Where the verified figure
+    disagrees with the predicted one, the difference is interaction, and
+    it is reported rather than smoothed over.
+    """
+    pop = sample_population(n=pop_n, seed=seed)
+    grid = NavGrid(free, height, cell, ceiling=ceiling, surface=surface,
+                   surface_order=surface_order)
+    base_area = grid.analyse(BASELINE, spawn)["reachable_m2"] or 1.0
+    cands = propose_fixes(grid, free, height, cell, spawn, goals,
+                          furniture=furniture)
+    if not cands:
+        return {"rows": [], "excluded_as_harmful": []}
+
+    base_by = _score_profiles(free, height, cell, spawn, goals, ceiling,
+                              surface, surface_order,
+                              base_area)["by_profile"]
+
+    # Value of each repair on its own, in square metres returned to the
+    # profile it helps most.
+    #
+    # Scored with the four named profiles only, not the whole population:
+    # picking and rejecting repairs needs per-profile area and goals, and
+    # nothing here reads the population figure. Running 60 sampled bodies
+    # per candidate to compute a number we discard was most of this
+    # function's runtime.
+    items, rejected = [], []
+    for fx in cands:
+        f2, h2 = apply_fix(free, height, cell, fx)
+        sc = _score_profiles(f2, h2, cell, spawn, goals, ceiling, surface,
+                             surface_order, base_area)
+        gain_m2 = 0.0
+        for nm, aft in sc.get("by_profile", {}).items():
+            before = base_by.get(nm, aft)["pct"]
+            gain_m2 = max(gain_m2, (aft["pct"] - before) / 100.0 * base_area)
+        # Same rule the greedy optimiser uses. Without it the knapsack
+        # cheerfully buys the repair that regrades a ramp and strands the
+        # wheelchair, because in aggregate square metres it looks like a
+        # bargain. Verified against the building, that set delivered half
+        # what it promised and cost the wheelchair a destination.
+        harmed = None
+        for nm, aft in sc.get("by_profile", {}).items():
+            before = base_by.get(nm)
+            if not before:
+                continue
+            if aft["goals"] < before["goals"]:
+                harmed = f"{nm} loses a destination"
+            elif aft["pct"] < before["pct"] - 0.25:
+                harmed = f"{nm} loses floor"
+        if harmed:
+            rejected.append({"id": fx["id"], "detail": fx["detail"],
+                             "cost": int(round(fx["cost"])), "why": harmed})
+            continue
+        items.append({"fx": fx, "cost": int(round(fx["cost"])),
+                      "m2": max(gain_m2, 0.0)})
+
+    out = []
+    seen_sets = {}
+    for B in budgets:
+        # 0/1 knapsack in $50 buckets -- finer than the cost estimates
+        # justify, and small enough to solve instantly.
+        step = 50
+        cap = int(B // step)
+        dp = [0.0] * (cap + 1)
+        pick = [[] for _ in range(cap + 1)]
+        for idx, it in enumerate(items):
+            w = int(round(it["cost"] / step))
+            if w <= 0:
+                # Free repairs are always taken.
+                for c in range(cap + 1):
+                    if idx not in pick[c]:
+                        dp[c] += it["m2"]
+                        pick[c] = pick[c] + [idx]
+                continue
+            for c in range(cap, w - 1, -1):
+                alt = dp[c - w] + it["m2"]
+                if alt > dp[c]:
+                    dp[c] = alt
+                    pick[c] = pick[c - w] + [idx]
+        chosen = [items[i] for i in pick[cap]]
+
+        # Verify: apply the whole set and measure what the building
+        # actually does, rather than trusting the sum.
+        #
+        # The frontier plateaus -- every budget above the point where
+        # nothing else is worth buying selects the identical set -- so
+        # results are cached by the set itself. Six of ten budgets here
+        # resolve to one already-measured answer.
+        key = tuple(sorted(i["fx"]["id"] for i in chosen))
+        if key in seen_sets:
+            out.append({**seen_sets[key], "budget": int(B)})
+            continue
+        f2, h2 = free.copy(), height.copy()
+        for it in chosen:
+            f2, h2 = apply_fix(f2, h2, cell, it["fx"])
+        ver = _score(f2, h2, cell, spawn, goals, pop, ceiling, surface,
+                     surface_order)
+        ver_by = ver.get("by_profile", {})
+        verified_m2 = {}
+        for nm, aft in ver_by.items():
+            before = base_by.get(nm, aft)["pct"]
+            verified_m2[nm] = round((aft["pct"] - before) / 100.0 * base_area, 1)
+
+        predicted = round(sum(i["m2"] for i in chosen), 1)
+        best = round(max(verified_m2.values()) if verified_m2 else 0.0, 1)
+        row = {
+            "budget": int(B),
+            "spend": sum(i["cost"] for i in chosen),
+            "picks": [i["fx"]["id"] for i in chosen],
+            "detail": [{"id": i["fx"]["id"], "detail": i["fx"]["detail"],
+                        "cost": i["cost"], "m2": round(i["m2"], 1),
+                        "pos": i["fx"]["pos"]} for i in chosen],
+            "predicted_m2": predicted,
+            "verified_m2": best,
+            "interaction_m2": round(best - predicted, 1),
+            "pct_full_access": ver["pct_full_access"],
+            "by_profile": {k: v for k, v in ver_by.items()},
+        }
+        seen_sets[key] = row
+        out.append(row)
+    # The rejected list is one property of the building, not of each
+    # budget. Repeating it per row put ten identical copies in the
+    # payload.
+    return {"rows": out, "excluded_as_harmful": rejected}
+
+
 def apply_fix(free, height, cell, fix):
     """Return a new (free, height) with one remediation applied."""
     f2, h2 = free.copy(), height.copy()
