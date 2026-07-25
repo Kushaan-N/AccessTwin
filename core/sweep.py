@@ -22,6 +22,7 @@ from schema import ALL_PROFILES, BASELINE, IN_PER_M
 from navgrid import NavGrid
 
 TURN_CIRCLE_IN = 60.0
+COUNTER_MAX_M = 0.865      # ADA 904.4.1 -- max height of a service counter
 HEAD_MIN_IN = 80.0
 MIN_RIDGE = 3
 MIN_AREA = 40
@@ -47,7 +48,8 @@ def _bbox(m, cell):
             round(float(ys.max()) * cell, 2), round(float(xs.max()) * cell, 2)]
 
 
-def sweep(grid: NavGrid, free, cell, rooms=None, spawn=None) -> list:
+def sweep(grid: NavGrid, free, cell, rooms=None, spawn=None,
+          solids=None) -> list:
     """Every rule, everywhere. Returns a flat list of findings."""
     out = []
     base_nav = grid.navigable(BASELINE)
@@ -113,6 +115,42 @@ def sweep(grid: NavGrid, free, cell, rooms=None, spawn=None) -> list:
                                 measured_in=round(
                                     float(grid.headroom[yx] * IN_PER_M), 1),
                                 threshold_in=p.head_clearance_in))
+
+    # -- counter and service heights.
+    # Not every access failure is a matter of getting there. A counter at
+    # till height is reachable, unusable, and invisible to any amount of
+    # navmesh analysis -- so it is checked against the model rather than
+    # the voxels, which is what a BIM checker would do.
+    if solids:
+        def attr(o, k, d=None):
+            return getattr(o, k, None) if not isinstance(o, dict) else o.get(k, d)
+        counters = [o for o in solids
+                    if attr(o, "tag") in ("cafe_counter", "reception",
+                                          "ticket_desk")]
+        for o in counters:
+            top = float(attr(o, "z1") or 0.0)
+            if top <= COUNTER_MAX_M:
+                continue
+            # A compliant counter may run high provided part of it is
+            # dropped; look for a lowered section sharing its footprint.
+            x0, y0 = float(attr(o, "x0")), float(attr(o, "y0"))
+            x1, y1 = float(attr(o, "x1")), float(attr(o, "y1"))
+            lowered = any(
+                float(attr(q, "z1") or 0) <= COUNTER_MAX_M + 1e-6
+                and float(attr(q, "x0")) < x1 + 0.6
+                and float(attr(q, "x1")) > x0 - 0.6
+                and float(attr(q, "y0")) < y1 + 0.6
+                and float(attr(q, "y1")) > y0 - 0.6
+                for q in counters if q is not o)
+            if lowered:
+                continue
+            out.append(dict(type="counter_height", agent="wheelchair",
+                            pos=[round((x0 + x1) / 2, 2),
+                                 round((y0 + y1) / 2, 2)],
+                            bbox=[round(x0, 2), round(y0, 2),
+                                  round(x1, 2), round(y1, 2)],
+                            measured_in=round(top / 0.0254, 1),
+                            threshold_in=round(COUNTER_MAX_M / 0.0254, 1)))
 
     # -- turning space, per room.
     # ADA 304.3.1 is about maneuvering inside a space, so it is evaluated
