@@ -181,7 +181,7 @@ class World:
 # the building
 # ======================================================================
 
-def build3d(seed: int = 7) -> World:
+def build3d(seed: int = 7, with_contents: bool = True) -> World:
     """A civic centre: open atrium, cafe, reading room, auditorium,
     accessible WC, lift, and a gallery raised 600 mm.
 
@@ -204,6 +204,13 @@ def build3d(seed: int = 7) -> World:
     rooms: list = []
 
     def add(kind, x0, y0, x1, y1, z0=0.0, z1=WALL_H, **kw):
+        # with_contents=False regenerates the identical building with the
+        # loose furniture omitted -- same walls, same ramp, same doors.
+        # Differencing the two free masks is then exact ground truth for
+        # which exclusions the building causes and which its contents do,
+        # rather than a guess based on what looks free-standing.
+        if not with_contents and kind == "furniture":
+            return
         S.append(Solid(kind, x0, y0, x1, y1, z0, z1, **kw))
 
     def wall(x0, y0, x1, y1, tag="", z0=0.0, z1=WALL_H, mat="wall"):
