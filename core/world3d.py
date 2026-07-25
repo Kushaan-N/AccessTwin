@@ -30,8 +30,13 @@ from typing import Optional
 
 import numpy as np
 
+from schema import SURFACES, DEFAULT_SURFACE
+
+# Fixed order so the uint8 raster and the viewer legend agree.
+SURFACE_ORDER = list(SURFACES.keys())
+
 CELL = 0.05                  # 5 cm voxel, same as a Recast cell size
-W, H = 44.0, 30.0            # building envelope, metres
+W, H = 44.0, 36.0            # envelope, metres (incl. courtyard)
 WALL_H = 2.9
 CEIL_Z = 3.0
 
@@ -59,6 +64,7 @@ class Solid:
     axis: Optional[str] = None
     rz0: float = 0.0
     rz1: float = 0.0
+    surface: str = ""            # floor finish, walkable solids only
 
     @property
     def walkable(self) -> bool:
@@ -99,6 +105,11 @@ class World:
         floor_z = np.zeros((nx, ny), dtype=np.float32)
         free = np.ones((nx, ny), dtype=bool)
         ceiling_z = np.full((nx, ny), CEIL_Z, dtype=np.float32)
+        # Floor finish per cell, as an index into SURFACE_ORDER. Written
+        # in the same pass as floor height, so whichever walkable solid
+        # wins the height also owns the finish -- a ramp laid over a
+        # carpeted floor is a ramp, not carpet.
+        surf = np.zeros((nx, ny), dtype=np.uint8)
 
         xs = (np.arange(nx) + 0.5) * CELL
         ys = (np.arange(ny) + 0.5) * CELL
@@ -129,7 +140,12 @@ class World:
             else:
                 top = np.full((i1 - i0, j1 - j0), s.z1, dtype=np.float32)
             blk = floor_z[i0:i1, j0:j1]
+            wins = top >= blk
             floor_z[i0:i1, j0:j1] = np.maximum(blk, top)
+            if s.surface:
+                sid = SURFACE_ORDER.index(s.surface)
+                sub = surf[i0:i1, j0:j1]
+                surf[i0:i1, j0:j1] = np.where(wins, sid, sub)
 
         # pass 2 -- obstructions and overheads, relative to the local floor
         lo, hi = BODY_BAND
@@ -150,7 +166,7 @@ class World:
 
         # Outside the envelope is not floor.
         free[:, :] &= True
-        return free, floor_z, ceiling_z
+        return free, floor_z, ceiling_z, surf
 
     # ---------- exports ----------
 
@@ -170,6 +186,9 @@ class World:
             "size": [W, H, CEIL_Z],
             "cell": CELL,
             "solids": [asdict(s) for s in self.solids],
+            "surfaces": [{"name": n, **{k: v for k, v in
+                          SURFACES[n].__dict__.items() if k != "name"}}
+                         for n in SURFACE_ORDER],
             "rooms": self.rooms,
             "spawn": list(self.spawn_m),
             "goals": {k: list(v) for k, v in self.goals_m.items()},
@@ -230,14 +249,27 @@ def build3d(seed: int = 7, with_contents: bool = True) -> World:
         below into real findings."""
         add("door_header", x0, y0, x1, y1, z0, WALL_H, material="header")
 
+    def floor(x0, y0, x1, y1, surface, z=0.0):
+        """A finish laid over an existing slab, 5 mm proud so it wins the
+        height comparison and therefore owns the surface id."""
+        add("slab", x0, y0, x1, y1, z - 0.005, z, tag="finish",
+            material="floor", surface=surface)
+
     def room(name, x0, y0, x1, y1, z=0.0):
         rooms.append({"name": name, "x0": x0, "y0": y0,
                       "x1": x1, "y1": y1, "z": z})
 
     # ================= envelope =================
-    add("slab", 0.0, 0.0, W, H, -0.2, 0.0, tag="ground", material="floor")
+    add("slab", 0.0, 0.0, W, H, -0.2, 0.0, tag="ground",
+        material="floor", surface="concrete")
     wall(0.0, 0.0, W, 0.2, tag="envelope")
     wall(0.0, H - 0.2, W, H, tag="envelope")
+    # The old north elevation is now internal: beyond it is the courtyard.
+    for (a, b) in [(0.0, 12.0), (13.4, W)]:
+        wall(a, 29.8, b, 30.0, tag="envelope")
+    header(12.0, 29.8, 13.4, 30.0)
+    wall(0.0, 30.0, 0.2, H, tag="envelope")
+    wall(W - 0.2, 30.0, W, H, tag="envelope")
     wall(W - 0.2, 0.0, W, H, tag="envelope")
     # west wall, split around the entrance
     wall(0.0, 0.0, 0.2, 13.0, tag="envelope")
@@ -249,8 +281,21 @@ def build3d(seed: int = 7, with_contents: bool = True) -> World:
     # North elevation is glazed: an atrium wants daylight, and glass
     # reads as openness in a way a blank wall cannot.
     for gx in range(6, 21, 2):
-        add("glazing", float(gx), H - 0.2, float(gx) + 1.6, H, 0.0, 2.6,
+        if gx >= 12 and gx < 14:
+            continue
+        add("glazing", float(gx), 29.8, float(gx) + 1.6, 30.0, 0.0, 2.6,
             material="glass")
+
+    # ---------------- floor finishes ----------------
+    # ADA 302 is a material rule, and it is the one axis on which a cane
+    # user out-performs a wheelchair: feet cross gravel and deep pile,
+    # castors do not.
+    floor(0.2, 0.2, 21.8, 29.8, "concrete")
+    floor(0.4, 0.4, 10.5, 9.5, "tile")                 # cafe
+    floor(22.2, 0.4, 31.8, 12.8, "carpet_low")         # community room
+    floor(22.2, 13.0, 43.8, 17.0, "concrete")          # corridor
+    floor(22.2, 17.2, 24.4, 18.65, "tile")             # WC
+    floor(22.2, 19.1, 30.5, 29.6, "carpet_low")        # reading room
 
     # ================= atrium =================
     # The whole west half is one volume. No cross walls, no cells.
@@ -386,6 +431,13 @@ def build3d(seed: int = 7, with_contents: bool = True) -> World:
 
     # ================= auditorium =================
     room("Auditorium", 32.2, 0.4, W - 0.4, 12.8)
+    # --- DEFECT: deep-pile carpet throughout the auditorium ----------
+    floor(32.2, 0.4, W - 0.4, 12.8, "carpet_deep")
+    gt.append(dict(id="auditorium_carpet_22mm", type="floor_surface",
+                   pos=[38.0, 6.5], measured_in=round(0.022 / IN, 2),
+                   blocks=["wheelchair", "sidewalk_delivery_robot"],
+                   note="22 mm deep-pile carpet throughout; ADA 302.2 caps "
+                        "pile at 13 mm. Geometrically the room is fine."))
     # Fixed seating laid out to a seat count. Rows are generous, the
     # cross aisle is not, and nowhere in the room is there a clear space
     # for somebody who brings their own seat.
@@ -493,13 +545,15 @@ def build3d(seed: int = 7, with_contents: bool = True) -> World:
         (STAIR_X[0], STAIR_Y[1], STAIR_X[1], 29.6),
         (STAIR_X[1], 17.2, W - 0.4, 29.6),
     ]:
-        add("slab", a, b, c, d, 0.0, GZ, tag="gallery", material="gallery")
+        add("slab", a, b, c, d, 0.0, GZ, tag="gallery",
+            material="gallery", surface="timber")
     add("wall", 30.9, 17.2, 31.0, 29.6, GZ, GZ + 1.0, tag="gallery_edge",
         material="parapet")
 
     # --- DEFECT: ramp built at 1:6.7 ---------------------------------
     add("ramp", RAMP_X[0], RAMP_Y[0], RAMP_X[1], RAMP_Y[1], 0.0, GZ,
-        tag="gallery_ramp", material="ramp", axis="y", rz0=0.0, rz1=GZ)
+        tag="gallery_ramp", material="ramp", axis="y", rz0=0.0, rz1=GZ,
+        surface="concrete")
     for rx in (RAMP_X[0] - 0.08, RAMP_X[1]):
         add("rail", rx, RAMP_Y[0], rx + 0.08, RAMP_Y[1], 0.85, 0.95,
             tag="ramp_rail", material="steel")
@@ -516,7 +570,8 @@ def build3d(seed: int = 7, with_contents: bool = True) -> World:
     for i in range(4):
         add("stair", STAIR_X[0], STAIR_Y[0] + i * 0.30,
             STAIR_X[1], STAIR_Y[0] + (i + 1) * 0.30,
-            0.0, (i + 1) * 0.15, tag=f"stair_{i}", material="concrete")
+            0.0, (i + 1) * 0.15, tag=f"stair_{i}", material="concrete",
+            surface="concrete")
     gt.append(dict(id="stair_4riser_150mm", type="step_height",
                    pos=[(STAIR_X[0] + STAIR_X[1]) / 2, 17.6],
                    measured_in=round(0.15 / IN, 1),
@@ -531,6 +586,19 @@ def build3d(seed: int = 7, with_contents: bool = True) -> World:
                            "vision_impaired_cane"],
                    note="Slab edge with no upstand or ramp for 5.3 m."))
 
+    # --- DEFECT: services grating across the gallery ----------------
+    floor(31.0, 23.0, 43.6, 23.9, "grating", z=0.60)
+    gt.append(dict(id="gallery_grating_22mm", type="floor_surface",
+                   pos=[37.0, 23.45], measured_in=round(0.022 / IN, 2),
+                   blocks=["wheelchair", "sidewalk_delivery_robot"],
+                   note="Services grating with 22 mm slots runs the full "
+                        "width; ADA 302.3 caps openings at 13 mm. Castors "
+                        "drop straight in."))
+    # Good practice, deliberately included so the analysis can also say
+    # when something is right: tactile warning surface at the stair.
+    floor(STAIR_X[0] - 0.1, STAIR_Y[0] - 0.9, STAIR_X[1] + 0.1,
+          STAIR_Y[0], "tactile")
+
     # gallery contents
     for k in range(4):
         add("furniture", 33.4 + k * 2.6, 27.6, 34.6 + k * 2.6, 28.0,
@@ -538,6 +606,26 @@ def build3d(seed: int = 7, with_contents: bool = True) -> World:
     for k in range(3):
         add("furniture", 40.4, 19.4 + k * 2.4, 42.4, 20.0 + k * 2.4,
             GZ, GZ + 0.95, tag="display_case", material="steel")
+
+    # ================= courtyard =================
+    # Outside, and paved in exactly the materials that read as "civic
+    # quality" on a drawing and stop a wheelchair at the door.
+    room("Courtyard", 0.2, 30.0, W - 0.2, H - 0.2)
+    floor(0.2, 30.0, W - 0.2, H - 0.2, "gravel")
+    # --- DEFECT: a cobbled path is the only route across ------------
+    floor(11.4, 30.0, 14.0, H - 0.2, "cobble")
+    gt.append(dict(id="courtyard_gravel", type="floor_surface",
+                   pos=[8.0, 33.0], measured_in=0.0,
+                   blocks=["wheelchair", "sidewalk_delivery_robot"],
+                   note="Loose gravel with a cobbled path: neither is firm "
+                        "and stable under a castor. ADA 302.1. A cane user "
+                        "crosses both without difficulty."))
+    for (px, py) in [(4.0, 32.0), (18.0, 32.0), (4.0, 34.5), (18.0, 34.5)]:
+        add("furniture", px - 0.5, py - 0.5, px + 0.5, py + 0.5, 0.0, 0.85,
+            tag="planter", material="concrete")
+    for k in range(3):
+        add("furniture", 16.0 + k * 3.2, 33.4, 17.8 + k * 3.2, 33.9,
+            0.0, 0.45, tag="bench", material="timber")
 
     # Goals sit on open floor by construction. reaches() tests the goal
     # cell directly without snapping, so a destination parked 200 mm from
@@ -548,6 +636,7 @@ def build3d(seed: int = 7, with_contents: bool = True) -> World:
         "restroom": (23.1, 17.6),
         "auditorium": (37.4, 11.8),
         "reading_room": (26.2, 24.4),
+        "courtyard": (8.0, 33.0),
     }
 
     return World(solids=S, spawn_m=(2.2, 15.0), goals_m=goals, gt=gt,
@@ -556,7 +645,7 @@ def build3d(seed: int = 7, with_contents: bool = True) -> World:
 
 if __name__ == "__main__":
     w = build3d(7)
-    free, fz, cz = w.rasterize()
+    free, fz, cz, sf = w.rasterize()
     print(f"solids        : {len(w.solids)}")
     print(f"grid          : {free.shape}  ({CELL*100:.0f} cm cells)")
     print(f"free fraction : {free.mean():.3f}")
