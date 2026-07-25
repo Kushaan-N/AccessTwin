@@ -28,6 +28,7 @@ from schema import ALL_PROFILES, BASELINE, WHEELCHAIR, IN_PER_M
 from world3d import build3d
 from navgrid import NavGrid
 from pathing import GeoField
+from sweep import sweep, group
 import analysis as A
 
 # Same validated categorical palette as the plan view, so a profile is
@@ -219,7 +220,7 @@ def main():
         pr["after_goals"] = {g: bool(after.reaches(p, spawn, c))
                              for g, c in goals.items()}
 
-    recall = score_recall(w, grid, profiles, cell)
+    recall = score_recall(w, grid, profiles, free, cell)
 
     scene = w.to_scene()
     scene.update({
@@ -258,43 +259,78 @@ def encode_mask(m):
                             ).decode("ascii")
 
 
-def score_recall(w, grid, profiles, cell):
-    """Which planted defects did the barrier finder actually rediscover?
+def score_recall(w, grid, profiles, free, cell):
+    """Which planted defects did the analysis rediscover, unprompted?
 
-    Matching is on location and kind, within 1.6 m -- we never tell the
-    finder where to look.
+    Two independent detectors, neither told where to look:
+
+      barriers -- what actually stopped a body on a route. Precise about
+                  exclusion, but reports only the cheapest barrier per
+                  route, so a second defect behind the first is masked,
+                  and a defect blocking nobody's route is invisible.
+      sweep    -- every ADA rule at every cell for every profile. Catches
+                  what the routes miss.
+
+    A defect counts as detected if either recovers it within 1.6 m.
     """
     found = []
     for pr in profiles:
-        for gname, j in pr["journeys"].items():
+        for _gname, j in pr["journeys"].items():
             for b in j.get("barriers", []):
-                found.append((b["kind"], b["pos"][0], b["pos"][1], pr["name"]))
-    # Turning-radius and head-clearance defects are geometric, not
-    # connectivity, so score them directly off the voxel grid.
+                found.append((b["kind"], b["pos"][0], b["pos"][1],
+                              "route:" + pr["name"], None))
+
+    sweep_raw = sweep(grid, free, cell, rooms=w.rooms, spawn=w.spawn)
+    for f in sweep_raw:
+        found.append((f["type"], f["pos"][0], f["pos"][1],
+                      "sweep:" + f["agent"], f.get("bbox")))
+
     per = []
     for d in w.gt:
         gx, gy = d["pos"]
-        hits = [f for f in found if f[0] == d["type"]
-                and abs(f[1] - gx) <= 1.6 and abs(f[2] - gy) <= 1.6]
-        detected = bool(hits)
-        detail = sorted({h[3] for h in hits})
-        if d["type"] == "turning_radius":
-            c = (int(round(gx / cell)), int(round(gy / cell)))
-            circle_in = float(grid.clearance[c] * 2 * IN_PER_M)
-            detected = circle_in < 60.0
-            detail = ["geometric"] if detected else []
-        if d["type"] == "head_clearance":
-            c = (int(round(gx / cell)), int(round(gy / cell)))
-            head_in = float(grid.headroom[c] * IN_PER_M)
-            detected = head_in < 80.0
-            detail = ["geometric"] if detected else []
+        def near(f):
+            if f[0] != d["type"]:
+                return False
+            if abs(f[1] - gx) <= 1.6 and abs(f[2] - gy) <= 1.6:
+                return True
+            # Linear features (a slab edge, a long pinch) are matched on
+            # extent: which cell along them is deepest is arbitrary.
+            bb = f[4] if len(f) > 4 else None
+            return bool(bb and bb[0] - 1.0 <= gx <= bb[2] + 1.0
+                        and bb[1] - 1.0 <= gy <= bb[3] + 1.0)
+
+        hits = [f for f in found if near(f)]
+        by = sorted({h[3].split(":")[0] for h in hits})
         per.append({"id": d["id"], "type": d["type"], "pos": d["pos"],
-                    "note": d.get("note", ""), "detected": detected,
-                    "detected_for": detail})
-    return {"planted": len(w.gt),
-            "detected": sum(1 for x in per if x["detected"]),
-            "recall": round(sum(1 for x in per if x["detected"]) /
-                            max(len(w.gt), 1), 3),
+                    "note": d.get("note", ""), "detected": bool(hits),
+                    "detected_by": by,
+                    "detected_for": sorted({h[3].split(":")[1] for h in hits})})
+
+    # Findings that match no planted defect are emergent, not false
+    # positives: mostly pinch points created by where the furniture
+    # landed rather than by the architecture.
+    grouped = group(sweep_raw)
+    def matches_planted(g):
+        for d in w.gt:
+            if g["type"] != d["type"]:
+                continue
+            gx, gy = d["pos"]
+            if abs(g["pos"][0] - gx) <= 1.6 and abs(g["pos"][1] - gy) <= 1.6:
+                return True
+            bb = g.get("bbox")
+            if bb and bb[0] - 1.0 <= gx <= bb[2] + 1.0 \
+                    and bb[1] - 1.0 <= gy <= bb[3] + 1.0:
+                return True
+        return False
+
+    emergent = [g for g in grouped if not matches_planted(g)]
+    n = sum(1 for x in per if x["detected"])
+    return {"planted": len(w.gt), "detected": n,
+            "recall": round(n / max(len(w.gt), 1), 3),
+            "sweep_findings": len(grouped),
+            "emergent_features": len(emergent),
+            "emergent": [{"type": e["type"], "pos": e["pos"],
+                          "agents": e["agents"]} for e in emergent[:10]],
             "per_defect": per}
 
 
