@@ -56,6 +56,28 @@
   --m-gallery:#D3D9DC;--m-parapet:#E6E9EA;
 }
 *{box-sizing:border-box}
+.sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+  overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.skip{position:absolute;left:-9999px;top:0;z-index:20;background:var(--sheet);
+  color:var(--ink);padding:9px 14px;border:1px solid var(--accent);
+  border-radius:0 0 4px 0;font-size:13px}
+.skip:focus{left:0}
+.tx{border:1px solid var(--rule);border-radius:3px;background:var(--sheet);
+  padding:9px 12px;font-size:13px}
+.tx summary{cursor:pointer;font-family:var(--mono);font-size:11px;
+  letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+.tx summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.tx h5{margin:12px 0 4px;font-size:13px}
+.tx ul{margin:4px 0 0;padding-left:18px;color:var(--ink-2)}
+.tx li{margin:2px 0}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#stage:focus-visible{outline-offset:-3px}
+
+/* A demo about exclusion that ignores a stated access preference would
+   be making its own point against itself. */
+@media (prefers-reduced-motion: reduce) {
+  .at-bar i, .progress i { transition: none !important; }
+}
 
 .at{
   background:var(--ground); color:var(--ink); font-family:var(--sans);
@@ -146,6 +168,7 @@
 
 .legend{display:flex;flex-direction:column;gap:5px}
 .wrow{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+.wrow[hidden]{display:none}   /* display:flex would otherwise win */
 .wrow input{flex:1;accent-color:var(--accent);cursor:pointer}
 .wrow b{font-family:var(--mono);font-size:14px;font-variant-numeric:tabular-nums;
   min-width:44px;text-align:right}
@@ -170,6 +193,7 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--panel);
 .sp{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
 </style>
 
+<a class="skip" href="#findings">Skip to the findings in text</a>
 <div class="at">
   <header class="head">
     <h1>Access&#8209;Twin<span>.</span></h1>
@@ -180,7 +204,8 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--panel);
 
   <div class="body">
     <div class="viewport">
-      <div id="stage"></div>
+      <div id="stage" tabindex="0" role="application"
+           aria-label="3D walkthrough. Use left and right arrow keys to change scene, or read the text findings below."></div>
       <div id="cpsum" class="cpsum" hidden></div>
       <div id="cppop" class="cppop" hidden role="dialog"
            aria-labelledby="cptitle" tabindex="-1">
@@ -231,6 +256,13 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--panel);
       </div>
     </aside>
   </div>
+
+  <p id="live" class="sr" role="status" aria-live="polite"></p>
+
+  <details id="findings" class="tx">
+    <summary>Findings, as text</summary>
+    <div id="txbody"></div>
+  </details>
 
   <footer class="foot">
     <button id="play">Pause</button>
