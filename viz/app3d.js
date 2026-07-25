@@ -48,6 +48,27 @@ try {
   if (!renderer.getContext()) throw new Error("no context");
 } catch (err) {
   if (el0("boot")) el0("boot").hidden = true;
+
+/* A first-time viewer lands on a panel of numbers with no idea what
+   building this is or why it is being audited. One card, two doors. */
+(function intro() {
+  const box = el0("intro");
+  if (!box || wantsWalk) return;
+  box.hidden = false;
+  playing = false;
+  const close = walk => {
+    box.hidden = true;
+    if (walk) { setInspect(false); playing = true; goto(0); }
+    else { playing = false; }
+  };
+  el0("introaudit").addEventListener("click", () => close(false));
+  el0("introwalk").addEventListener("click", () => close(true));
+  box.addEventListener("click", e => { if (e.target === box) close(false); });
+  addEventListener("keydown", function esc(e) {
+    if (e.key === "Escape" && !box.hidden) { close(false); }
+  });
+  el0("introaudit").focus();
+})();
   if (el0("nogl")) el0("nogl").hidden = false;
   const det = el0("findings");
   if (det) det.open = true;
@@ -1090,6 +1111,12 @@ function renderIssueList() {
       <span class="r2">${it.detail}</span>
       <span class="r3">${it.room ? it.room + " · " : ""}${who(it)}</span>
     </button></li>`;
+  if (!shown.length) {
+    el("islist").innerHTML =
+      `<li class="isempty">Nothing in this category.<br>` +
+      `Try <strong>All</strong>.</li>`;
+    return;
+  }
   el("islist").innerHTML = PHASES.map(ph => {
     const rows = shown.filter(({ it }) => ph.test(it));
     if (!rows.length) return "";
@@ -1141,13 +1168,19 @@ function setInspect(on) {
     renderIssueList();
     lookAt(BW / 2, -8, 36, BW / 2, BH / 2, 0);
     const paid = ISSUES.filter(i => i.cost > 0);
-    el("kicker").textContent = "Inspect";
-    el("caption").innerHTML =
-      `Every issue the analysis found, with what fixes it. ` +
-      `<em>Click a row or a marker.</em> ` +
-      `${ISSUES.length - paid.length} cost nothing — they are furniture. ` +
-      `The rest total $${paid.reduce((a, c) => a + c.cost, 0)
-        .toLocaleString()} of building work.`;
+    // Through the same fade, which cancels any write the walkthrough
+    // deferred. Writing directly let goto()'s pending crossfade land
+    // afterwards and repaint a walkthrough caption under an AUDIT
+    // header.
+    fadeCaption(() => {
+      el("kicker").textContent = "Inspect";
+      el("caption").innerHTML =
+        `Every issue the analysis found, with what fixes it. ` +
+        `<em>Click a row or a marker.</em> ` +
+        `${ISSUES.length - paid.length} cost nothing — they are furniture. ` +
+        `The rest total $${paid.reduce((a, c) => a + c.cost, 0)
+          .toLocaleString()} of building work.`;
+    });
     el("sceneno").textContent = "AUDIT";
     el("statn").textContent = String(ISSUES.length);
     el("statl").textContent = "issues found";
@@ -1768,7 +1801,23 @@ addEventListener("keydown", e => {
   if (e.key.toLowerCase() === "p") { el("play").click(); }
   if (e.key === "Escape") { hideChokepoint(); if (inspecting) setInspect(false); }
   if (e.key.toLowerCase() === "i") { e.preventDefault(); setInspect(!inspecting); }
-  if (inspecting) return;
+  if (inspecting) {
+    // Step the worklist from the keyboard: useful when presenting, and
+    // the only way to reach the issues without a mouse.
+    const vis = [...el("islist").querySelectorAll("button[data-i]")]
+      .map(b => Number(b.dataset.i));
+    if (!vis.length) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+      e.preventDefault();
+      const at = vis.indexOf(isSel);
+      selectIssue(vis[(at + 1) % vis.length]);
+    } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+      e.preventDefault();
+      const at = vis.indexOf(isSel);
+      selectIssue(vis[(at <= 0 ? vis.length : at) - 1]);
+    }
+    return;
+  }
   // Number keys jump straight to a scene. Three minutes is longer than
   // most demo slots, and hunting with the arrow keys on stage is worse
   // than not showing the scene at all.
@@ -1862,9 +1911,34 @@ goto(0);
 // you know"; the audit is the thing somebody came for, and a judge who
 // only looks for ten seconds should land on findings rather than on an
 // establishing shot.
-setInspect(true);
+// #walkthrough opens the film instead of the audit, so either view can
+// be shared as a link.
+const wantsWalk = location.hash.toLowerCase().indexOf("walk") >= 0;
+setInspect(!wantsWalk);
+if (wantsWalk) playing = true;
 // One synchronous draw before the spinner goes, so the first thing the
 // viewer sees is the building rather than a flash of empty stage.
 renderer.render(scene, camera);
 if (el0("boot")) el0("boot").hidden = true;
+
+/* A first-time viewer lands on a panel of numbers with no idea what
+   building this is or why it is being audited. One card, two doors. */
+(function intro() {
+  const box = el0("intro");
+  if (!box || wantsWalk) return;
+  box.hidden = false;
+  playing = false;
+  const close = walk => {
+    box.hidden = true;
+    if (walk) { setInspect(false); playing = true; goto(0); }
+    else { playing = false; }
+  };
+  el0("introaudit").addEventListener("click", () => close(false));
+  el0("introwalk").addEventListener("click", () => close(true));
+  box.addEventListener("click", e => { if (e.target === box) close(false); });
+  addEventListener("keydown", function esc(e) {
+    if (e.key === "Escape" && !box.hidden) { close(false); }
+  });
+  el0("introaudit").focus();
+})();
 requestAnimationFrame(frame);
