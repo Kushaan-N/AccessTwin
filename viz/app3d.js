@@ -161,6 +161,7 @@ function buildMaterials() {
                  : 0.72, 0, kit, deep ? 26 : 14);
     if (m.normalScale) m.normalScale.set(deep ? 1.5 : 0.7, deep ? 1.5 : 0.7);
     m.envMapIntensity = deep ? 0.25 : (TOK.dark ? 0.8 : 1.0);
+    m.dithering = true;
     MAT["surf_" + sf.name] = m;
   });
 }
@@ -216,6 +217,9 @@ function buildSolids() {
       // Assembled at the solid's own dimensions, so what the camera sees
       // occupies exactly the footprint the analysis eroded around.
       furn.position.copy(v3(s.x0 + w / 2, s.y0 + d / 2, s.z0));
+      if (Math.max(w, d) * h <= 0.25) {
+        furn.traverse(o => { if (o.isMesh) o.castShadow = false; });
+      }
       furn.userData.solid = s;
       building.add(furn);
       SOLID_MESHES.push(furn);
@@ -227,8 +231,22 @@ function buildSolids() {
     } else {
       mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
       mesh.position.copy(v3(s.x0 + w / 2, s.y0 + d / 2, s.z0 + h / 2));
+      // Finish slabs are laid flush with the slab beneath, so their top
+      // faces are exactly coplanar and the depth buffer cannot choose
+      // between them -- the shimmer that appears the moment the camera
+      // moves. polygonOffset does not help here because the slab below
+      // carries a finish material too and takes the same offset.
+      //
+      // Lift the finish 4 mm in the scene graph only. The analysis reads
+      // the solids, never these meshes, so the voxelisation and every
+      // number derived from it are untouched.
+      if (s.tag === "finish") mesh.position.y += 0.004;
     }
-    mesh.castShadow = s.kind !== "slab";
+    // A chair leg casts a shadow nobody can see at demo distance and
+    // costs a full pass through the shadow map. Only things big enough
+    // to read cast.
+    const bulk = Math.max(w, d) * h;
+    mesh.castShadow = s.kind !== "slab" && bulk > 0.25;
     mesh.receiveShadow = true;
     mesh.userData.solid = s;
     building.add(mesh);
@@ -1022,6 +1040,17 @@ function who(it) {
   return "excludes " + names.filter(n => n !== "Walking adult").join(", ");
 }
 
+/* Grouping the worklist by what it takes to action, not by cost.
+   "Three things you can do this afternoon for nothing" is a different
+   conversation from "$71k of building work", and a client hears the
+   first one. */
+const PHASES = [
+  { key: "now", label: "Today · no cost", test: it => it.cost === 0 },
+  { key: "soon", label: "Minor works · under $2,500",
+    test: it => it.cost > 0 && it.cost < 2500 },
+  { key: "capital", label: "Capital works", test: it => it.cost >= 2500 },
+];
+
 function renderIssueList() {
   const shown = ISSUES.map((it, i) => ({ it, i })).filter(({ it }) =>
     isFilter === "all" ? true
@@ -1036,7 +1065,16 @@ function renderIssueList() {
     `${ISSUES.length} issues · ${free.length} cost nothing` +
     (ISSUES[0] && ISSUES[0].minor_folded
       ? ` · ${ISSUES[0].minor_folded} minor folded` : "");
-  el("islist").innerHTML = shown.map(({ it, i }) => `
+  // What the money is actually for. A percentage of a sampled
+  // population is the number a client can act on; square metres are not.
+  const pop = D.population;
+  if (pop && el("ispop")) {
+    el("ispop").innerHTML =
+      `<b>${(100 - pop.pct_full_access).toFixed(0)}%</b> of a sampled ` +
+      `mobility population of ${pop.n_sampled} cannot reach every ` +
+      `destination in this building today.`;
+  }
+  const row = ({ it, i }) => `
     <li><button data-i="${i}" class="${isSel === i ? "sel" : ""}">
       <span class="r1">
         <em class="v-${it.verdict}">${VLABEL[it.verdict] || it.verdict}</em>
@@ -1044,8 +1082,16 @@ function renderIssueList() {
       </span>
       <span class="r2">${it.detail}</span>
       <span class="r3">${it.room ? it.room + " · " : ""}${who(it)}</span>
-    </button></li>`).join("");
-  el("islist").querySelectorAll("button").forEach(b =>
+    </button></li>`;
+  el("islist").innerHTML = PHASES.map(ph => {
+    const rows = shown.filter(({ it }) => ph.test(it));
+    if (!rows.length) return "";
+    const sum = rows.reduce((a, { it }) => a + it.cost, 0);
+    return `<li class="isphase">${ph.label}<span>${
+      sum ? "$" + sum.toLocaleString() : rows.length + " items"
+    }</span></li>` + rows.map(row).join("");
+  }).join("");
+  el("islist").querySelectorAll("button[data-i]").forEach(b =>
     b.addEventListener("click", () => selectIssue(Number(b.dataset.i))));
 }
 
@@ -1644,8 +1690,29 @@ el("play").addEventListener("click", () => {
 });
 el("restart").addEventListener("click", () => goto(0));
 el("inspect").addEventListener("click", () => setInspect(!inspecting));
+el("iscopy").addEventListener("click", async () => {
+  // A worklist you cannot get out of the page is a demo, not a tool.
+  const esc = v => `"${String(v).replace(/"/g, '""')}"`;
+  const csv = [["verdict", "room", "issue", "cost_usd", "excludes",
+                "position_x_m", "position_y_m"].join(",")]
+    .concat(ISSUES.map(it => [
+      it.verdict, it.room || "", it.detail, it.cost,
+      (it.excludes || []).map(n => (P[n] && P[n].label) || n).join("; "),
+      it.pos[0], it.pos[1]].map(esc).join(",")))
+    .join("\n");
+  try {
+    await navigator.clipboard.writeText(csv);
+    el("iscopy").textContent = "Copied";
+  } catch (err) {
+    el("iscopy").textContent = "Press ⌘C";
+    const ta = document.createElement("textarea");
+    ta.value = csv; document.body.appendChild(ta); ta.select();
+  }
+  setTimeout(() => { el("iscopy").textContent = "Copy"; }, 1800);
+});
 el("ispanel").querySelectorAll(".isfilters button").forEach(b =>
   b.addEventListener("click", () => {
+    if (!b.dataset.f) return;
     isFilter = b.dataset.f;
     el("ispanel").querySelectorAll(".isfilters button")
       .forEach(x => x.classList.toggle("on", x === b));
