@@ -373,6 +373,80 @@ function drawRoute(path, color, arrived) {
   }
 }
 
+/* ---------- floor material overlay ---------- */
+/* ADA 302 is a material rule, so the material has to be visible. Each
+   finish is painted in its own colour and named, because "deep-pile
+   carpet" is a thing a client recognises and "22 mm" is not. */
+const SURFDEFS = D.surfaces || [];   // NB: SURF is the texture kit
+const SG = D.surface_grid;
+const surfTex = (() => {
+  if (!SG) return null;
+  const bin = atob(SG.data), raw = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i);
+  const data = new Uint8Array(SG.nx * SG.ny * 4);
+  const t = new THREE.DataTexture(data, SG.nx, SG.ny, THREE.RGBAFormat);
+  t.flipY = false;
+  t.raw = raw;
+  return t;
+})();
+
+function paintSurfaces(alpha) {
+  if (!surfTex) return;
+  const d = surfTex.image.data, raw = surfTex.raw;
+  const cols = SURFDEFS.map(s => new THREE.Color(s.color));
+  for (let x = 0; x < SG.nx; x++) {
+    for (let y = 0; y < SG.ny; y++) {
+      const i = x * SG.ny + y, o = (y * SG.nx + x) * 4;
+      const c = cols[raw[i]] || cols[0];
+      d[o] = c.r * 255; d[o + 1] = c.g * 255; d[o + 2] = c.b * 255;
+      d[o + 3] = alpha * 255;
+    }
+  }
+  surfTex.needsUpdate = true;
+}
+
+const surfMat = surfTex ? new THREE.MeshBasicMaterial({
+  map: surfTex, transparent: true, depthWrite: false,
+  polygonOffset: true, polygonOffsetFactor: -5, polygonOffsetUnits: -5 }) : null;
+const surfGroup = new THREE.Group();
+scene.add(surfGroup);
+if (surfMat) {
+  [[0.016, 0, 0, BW, BH], [0.616, 31.0, 17.2, 12.6, 12.4]].forEach(
+    ([z, x0, y0, w, h], k) => {
+      const g = new THREE.PlaneGeometry(w, h);
+      const uv = g.attributes.uv;
+      for (let i = 0; i < uv.count; i++) {
+        uv.setXY(i, (x0 + uv.getX(i) * w) / BW, (y0 + uv.getY(i) * h) / BH);
+      }
+      uv.needsUpdate = true;
+      const m = new THREE.Mesh(g, surfMat);
+      m.rotation.x = -Math.PI / 2;
+      m.position.copy(v3(x0 + w / 2, y0 + h / 2, z));
+      m.renderOrder = 4 + k;
+      surfGroup.add(m);
+    });
+}
+surfGroup.visible = false;
+
+function surfaceLegend() {
+  // Only the finishes actually present, each with who it stops.
+  const present = new Set();
+  if (surfTex) surfTex.raw.forEach(v => present.add(v));
+  const rows = SURFDEFS.map((sf, i) => ({ sf, i }))
+    .filter(r => present.has(r.i))
+    .map(({ sf }) => {
+      const stops = D.profiles.filter(p => {
+        if (p.name === "baseline_walking") return false;
+        const need = p.name !== "vision_impaired_cane";
+        return (need && !sf.firm) || sf.pile_mm > (p.name === "wheelchair" ? 13 : p.name === "sidewalk_delivery_robot" ? 8 : 30)
+          || sf.opening_mm > (p.name === "wheelchair" ? 13 : p.name === "sidewalk_delivery_robot" ? 10 : 40);
+      }).map(p => p.label);
+      return `<span><i style="background:${sf.color}"></i>${sf.label}` +
+        (stops.length ? `<b>stops ${stops.length}</b>` : "") + `</span>`;
+    });
+  el("roomstate").innerHTML = rows.join("");
+}
+
 /* ---------- room state overlays ---------- */
 /* One translucent pad per room, recoloured live as the body widens.
    Named rooms switching off one at a time reads from the back of a
@@ -534,6 +608,17 @@ function samplePath(path, s) {
 }
 
 const SPEED = { walker: 1.35, wheelchair: 1.05, cane: 0.85, robot: 1.0 };
+
+/* Real walking pace across a 44 m building does not fit in a twelve
+   second scene -- the agent covers a third of its route and the shot
+   reads as "it barely moved". Speed is scaled so the whole journey
+   completes with time to spare, and the ratio between profiles is
+   preserved so the wheelchair still visibly trails the walker. */
+function paceFor(profile, lengthM, dur) {
+  const base = SPEED[profile.body] || 1.2;
+  const needed = lengthM / Math.max(dur * 0.68, 1);
+  return Math.max(base, Math.min(needed, base * 4.5));
+}
 
 function placeAgent(profile, sample, t) {
   const g = profile.agent, P = g.userData.parts;
@@ -1056,6 +1141,32 @@ const SCENES = [
     }
   },
   {
+    id: "materials", dur: 14.0, kicker: "What the floor is made of",
+    cap: `Geometry is not the only rule. <em>ADA 302 governs the floor
+          itself</em> — firm, stable, pile under 13 mm, openings under
+          13 mm. Deep-pile carpet in the auditorium, a services grating
+          across the gallery, gravel and setts in the courtyard: every one
+          is level, wide and compliant on every dimension, and every one
+          stops a castor dead. <em>This is the axis where the cane user
+          out-performs the wheelchair</em> — feet cross gravel, wheels do not.`,
+    stat: () => ["ADA 302", "surfaces: firm, stable, slip-resistant"],
+    materials: true,
+    enter() {
+      hideAgents(); clearMarkers(); decalGroup.visible = false;
+      cpGroup.visible = false; roomGroup.visible = false;
+      paintSurfaces(0.85); surfGroup.visible = true;
+      el("widthcard").hidden = false;
+      el("widthcard").querySelector("h3").textContent = "Floor materials";
+      el("widthcard").querySelector(".wrow").hidden = true;
+      surfaceLegend();
+      setWallCut(0.16);
+      lookAt(BW / 2, -4, 36, BW / 2, BH / 2, 0);
+    },
+    tick(t) {
+      lookAt(BW / 2 + Math.sin(t * 0.24) * 9, -4, 36, BW / 2, BH / 2, 0);
+    }
+  },
+  {
     id: "contents", dur: 10.0, kicker: "The building, or what is in it",
     cap: () => {
       const c = D.counterfactual;
@@ -1229,7 +1340,7 @@ function stepWalks(sc, t, dt) {
     if (!st || st.goal !== goal) return;
     if (t < delay) { p.agent.visible = false; return; }
     if (!st.drawn) { st.drawn = true; drawRoute(st.j.path, p.c, st.j.arrived); }
-    const sp = SPEED[p.body] || 1.2;
+    const sp = paceFor(p, st.len, SCENES[sceneI].dur);
     if (!st.done) st.s += dt * sp;
     if (st.s >= st.len) {
       st.s = st.len;
@@ -1270,6 +1381,15 @@ function applyScene(i) {
   const st = s.stat ? s.stat() : ["", ""];
   el("statn").textContent = st[0];
   el("statl").textContent = st[1];
+  // Announce the scene to assistive tech. Without this the whole piece
+  // is a silent canvas.
+  const liveEl = el("live");
+  if (liveEl) {
+    const plain = (typeof s.cap === "function" ? s.cap() : s.cap)
+      .replace(/<[^>]+>/g, "");
+    liveEl.textContent = `Scene ${i + 1} of ${SCENES.length}. ` +
+      `${s.kicker}. ${plain}`;
+  }
   el("chips").innerHTML = D.profiles.map(p => {
     const on = s.profile === p.name;
     return `<span class="chip${on ? " on" : ""}">
@@ -1281,6 +1401,12 @@ function applyScene(i) {
   userCam = false;
   sliderTouched = false;
   roomLabels.visible = true;
+  if (!s.materials) {
+    surfGroup.visible = false;
+    const wc = el("widthcard");
+    wc.querySelector("h3").textContent = "Body width";
+    wc.querySelector(".wrow").hidden = false;
+  }
   if (s.id !== "choke") {
     cpGroup.visible = false;
     el("cpsum").hidden = true;
@@ -1296,6 +1422,10 @@ function applyScene(i) {
 /* ---------- loop ---------- */
 let sceneI = 0, sceneT = 0, playing = true, clock = 0, last = 0;
 let sliderTouched = false;
+/* Honour a stated preference for reduced motion: the camera stops
+   drifting and the markers stop pulsing. The walkthrough still plays,
+   because the content IS the motion -- what goes is the decoration. */
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const TOTAL = SCENES.reduce((a, s) => a + s.dur, 0);
 
 function goto(i) {
@@ -1326,7 +1456,8 @@ function frame(ts) {
     // reached the advance below. Failures are now contained per-scene and
     // reported once instead of silently freezing the demo.
     try {
-      if (s.tick && !userCam) s.tick(sceneT);
+      if (s.tick && !userCam && !REDUCED) s.tick(sceneT);
+      else if (s.tick && !userCam && REDUCED && sceneT < 0.1) s.tick(0);
       stepWalks(s, sceneT, dt);
     } catch (err) {
       if (!s._warned) { s._warned = 1; console.error("scene", s.id, err); }
@@ -1346,7 +1477,7 @@ function frame(ts) {
   markers.children.forEach(m => {
     const age = clock - m.userData.born;
     const p = m.userData.pulse;
-    if (p) { const q = 1 + Math.sin(clock * 3) * 0.12; p.scale.set(q, q, 1); }
+    if (p && !REDUCED) { const q = 1 + Math.sin(clock * 3) * 0.12; p.scale.set(q, q, 1); }
     m.children.forEach(c => {
       if (c.isSprite) c.material.opacity = Math.min(1, age * 2.5);
     });
@@ -1413,6 +1544,34 @@ window.__AT3 = Object.assign(window.__AT3 || {}, {
     return SCENES[sceneI].kicker;
   }
 });
+
+/* A text equivalent of every finding, so the piece is usable without
+   seeing or operating the 3D view at all. */
+(function transcript() {
+  const t = el("txbody");
+  if (!t) return;
+  const esc = x => String(x).replace(/[&<>]/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const cov = D.profiles.map(p =>
+    `<li>${esc(p.label)}: reaches ${p.pct}% of the floor, ` +
+    `${Object.values(p.journeys).filter(j => j.arrived).length} of ` +
+    `${Object.keys(p.journeys).length} destinations` +
+    (p.island_m2 ? `, ${p.island_m2} m² stranded` : "") + `</li>`).join("");
+  const cps = (D.chokepoints || []).map(c =>
+    `<li>${esc(c.detail)} — ${c.verdict === "move" ? "no cost, relocate contents"
+      : "$" + c.cost.toLocaleString()}` +
+    (c.excludes && c.excludes.length
+      ? `; excludes ${esc(c.excludes.map(n => (P[n] && P[n].label) || n)
+        .join(", "))}` : "") + `</li>`).join("");
+  const rec = D.recall || {};
+  t.innerHTML =
+    `<h5>Who reaches what</h5><ul>${cov}</ul>` +
+    `<h5>Detection</h5><ul><li>${rec.detected} of ${rec.planted} planted ` +
+    `defects recovered by an analysis never told where to look</li></ul>` +
+    `<h5>Blockages and what they cost</h5><ul>${cps}</ul>` +
+    `<p style="margin-top:10px;color:var(--ink-3);font-size:11.5px">` +
+    `Costs are illustrative order-of-magnitude figures, not quotes.</p>`;
+})();
 
 el("meta").textContent =
   `seed ${D.seed} · ${BW}×${BH} m · ${(D.grid.cell * 100).toFixed(0)} cm voxels · ` +
