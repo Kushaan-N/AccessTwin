@@ -31,7 +31,7 @@ from typing import Optional
 import numpy as np
 
 CELL = 0.05                  # 5 cm voxel, same as a Recast cell size
-W, H = 32.0, 22.0            # building envelope, metres
+W, H = 44.0, 30.0            # building envelope, metres
 WALL_H = 2.9
 CEIL_Z = 3.0
 
@@ -182,14 +182,21 @@ class World:
 # ======================================================================
 
 def build3d(seed: int = 7) -> World:
-    """A civic centre: lobby, cafe, spine corridor, community room,
-    accessible WC, and a raised gallery.
+    """A civic centre: open atrium, cafe, reading room, auditorium,
+    accessible WC, lift, and a gallery raised 600 mm.
 
-    Every planted defect is a condition that occurs constantly in real
-    buildings and passes a plan-check: a door that measures fine until
+    The plan is deliberately open. A corridor-and-cells building hides
+    its access failures behind doors; an atrium with a cafe in it fails
+    in public, in the middle of the floor, which is both more honest and
+    far more legible in three dimensions.
+
+    Every planted defect is a condition that occurs constantly in
+    practice and passes a plan check: a door that measures fine until
     you account for the leaf, a ramp built to the wrong grade, a
-    threshold nobody thought about, a WC that has all its fixtures but
-    no room to turn, a bulkhead dropped under a duct run.
+    threshold nobody costed, a WC with every fixture correct and no room
+    to turn, a lift car specified by capacity rather than footprint,
+    seating laid out to a seat count, a counter at till height, and a
+    screen hung at exactly the height a cane cannot find.
     """
     rng = np.random.default_rng(seed)
     S: list[Solid] = []
@@ -212,236 +219,331 @@ def build3d(seed: int = 7) -> World:
     def header(x0, y0, x1, y1, z0=2.10):
         """Structure over a door opening. Above the body band, so it is
         overhead rather than an obstruction -- which is exactly the
-        distinction that makes the low bulkhead below a real finding."""
+        distinction that makes the low bulkhead and the hung screen
+        below into real findings."""
         add("door_header", x0, y0, x1, y1, z0, WALL_H, material="header")
 
-    # ---------------- ground slab + envelope ----------------
+    def room(name, x0, y0, x1, y1, z=0.0):
+        rooms.append({"name": name, "x0": x0, "y0": y0,
+                      "x1": x1, "y1": y1, "z": z})
+
+    # ================= envelope =================
     add("slab", 0.0, 0.0, W, H, -0.2, 0.0, tag="ground", material="floor")
     wall(0.0, 0.0, W, 0.2, tag="envelope")
     wall(0.0, H - 0.2, W, H, tag="envelope")
-    wall(0.0, 0.0, 0.2, H, tag="envelope")
     wall(W - 0.2, 0.0, W, H, tag="envelope")
+    # west wall, split around the entrance
+    wall(0.0, 0.0, 0.2, 13.0, tag="envelope")
+    wall(0.0, 17.0, 0.2, H, tag="envelope")
+    header(0.0, 13.0, 0.2, 17.0)
+    add("glazing", 0.0, 13.0, 0.2, 14.0, 0.0, 2.10, material="glass")
+    add("glazing", 0.0, 16.0, 0.2, 17.0, 0.0, 2.10, material="glass")
 
-    # entrance opening in the west wall (glazed doors, always passable)
-    S[:] = [s for s in S]
-    add("glazing", 0.0, 8.6, 0.2, 9.4, 0.0, WALL_H, material="glass")
-    add("glazing", 0.0, 12.6, 0.2, 13.4, 0.0, WALL_H, material="glass")
-    # the doorway itself: cut by simply not walling y 9.4..12.6
-    for (a, b) in [(0.2, 8.6), (13.4, H - 0.2)]:
-        pass  # west wall already continuous; carve below
+    # North elevation is glazed: an atrium wants daylight, and glass
+    # reads as openness in a way a blank wall cannot.
+    for gx in range(6, 21, 2):
+        add("glazing", float(gx), H - 0.2, float(gx) + 1.6, H, 0.0, 2.6,
+            material="glass")
 
-    # carve the entrance: replace the west envelope wall with two pieces
-    S[:] = [s for s in S if not (s.kind == "wall" and s.tag == "envelope"
-                                 and s.x0 == 0.0 and s.x1 == 0.2)]
-    wall(0.0, 0.0, 0.2, 9.4, tag="envelope")
-    wall(0.0, 12.6, 0.2, H, tag="envelope")
-    header(0.0, 9.4, 0.2, 12.6)
+    # ================= atrium =================
+    # The whole west half is one volume. No cross walls, no cells.
+    room("Atrium", 0.2, 0.2, 21.8, H - 0.2)
 
-    rooms.append({"name": "Entrance", "x0": 0.2, "y0": 8.5, "x1": 4.0,
-                  "y1": 13.5, "z": 0.0})
+    # structural grid
+    for cx in (7.0, 13.0, 19.0):
+        for cy in (6.0, 12.0, 18.0, 24.0):
+            add("wall", cx - 0.22, cy - 0.22, cx + 0.22, cy + 0.22,
+                0.0, WALL_H, tag="column", material="concrete")
 
-    # ---------------- lobby ----------------
-    rooms.append({"name": "Lobby", "x0": 0.2, "y0": 0.2, "x1": 13.8,
-                  "y1": 21.8, "z": 0.0})
+    # ---- cafe, open into the atrium -------------------------------
+    room("Cafe", 0.4, 0.4, 10.5, 9.5)
+    add("furniture", 8.6, 1.6, 9.6, 8.4, 0.0, 1.05,
+        tag="cafe_counter", material="timber")
+    # --- DEFECT: counter at till height with no lowered section ------
+    gt.append(dict(id="counter_1050mm", type="counter_height",
+                   pos=[9.1, 5.0], measured_in=round(1.05 / IN, 1),
+                   blocks=["wheelchair"],
+                   note="Service counter runs 6.8 m at 1050 mm with no "
+                        "lowered section; ADA 904.4.1 requires 865 mm."))
+    for k in range(6):
+        add("furniture", 8.0, 2.2 + k * 1.1, 8.45, 2.65 + k * 1.1, 0.0, 0.78,
+            tag="stool", material="timber")
 
-    # ---------------- cross wall at x = 13.8, with three openings -------
-    # openings: community room door A (0.70 m), door B (1.20 m w/ threshold),
-    # and the 3.0 m corridor mouth.
-    XW = 13.8
-    segs = [(0.2, 3.0), (4.2, 5.6), (6.3, 10.0), (13.0, 17.2), (18.6, 21.8)]
-    for (a, b) in segs:
+    # Rejection sampling with a bounded attempt count. Asking for more
+    # tables than the separation allows spins forever, so the loop is
+    # capped and simply places fewer.
+    placed, spots, tries = 0, [], 0
+    while placed < 9 and tries < 400:
+        tries += 1
+        cx = float(rng.uniform(1.4, 7.4))
+        cy = float(rng.uniform(1.4, 8.6))
+        if any(abs(cx - a) < 1.75 and abs(cy - b) < 1.75 for a, b in spots):
+            continue
+        spots.append((cx, cy))
+        add("furniture", cx - 0.40, cy - 0.40, cx + 0.40, cy + 0.40,
+            0.0, 0.74, tag="cafe_table", material="timber")
+        for (dx, dy) in [(-0.78, 0), (0.78, 0), (0, -0.78), (0, 0.78)]:
+            if rng.random() < 0.7:
+                add("furniture", cx + dx - 0.22, cy + dy - 0.22,
+                    cx + dx + 0.22, cy + dy + 0.22, 0.0, 0.86,
+                    tag="cafe_chair", material="timber")
+        placed += 1
+
+    # --- DEFECT: two benches leave an 860 mm gap ---------------------
+    add("furniture", 11.6, 10.4, 14.0, 11.2, 0.0, 0.75, tag="bench",
+        material="timber")
+    add("furniture", 11.6, 12.06, 14.0, 12.86, 0.0, 0.75, tag="bench",
+        material="timber")
+    gt.append(dict(id="atrium_pinch_860mm", type="clearance_width",
+                   pos=[12.8, 11.63], measured_in=round(0.86 / IN, 1),
+                   blocks=["vision_impaired_cane"],
+                   note="860 mm between two benches. The architecture is "
+                        "fine; the furniture is not."))
+
+    # ---- reception -------------------------------------------------
+    add("furniture", 3.0, 14.0, 6.0, 15.4, 0.0, 1.05, tag="reception",
+        material="timber")
+
+    # ---- lounge seating --------------------------------------------
+    for k in range(4):
+        add("furniture", 14.6 + k * 1.5, 23.0, 15.6 + k * 1.5, 24.0,
+            0.0, 0.86, tag="lobby_seat", material="fabric")
+    for k in range(3):
+        add("furniture", 15.4 + k * 1.5, 26.0, 16.4 + k * 1.5, 27.0,
+            0.0, 0.86, tag="lobby_seat", material="fabric")
+    add("furniture", 17.4, 24.6, 19.0, 25.6, 0.0, 0.42, tag="low_table",
+        material="timber")
+
+    # ---- planters ---------------------------------------------------
+    for (px, py) in [(4.5, 20.0), (10.0, 20.0), (4.5, 26.0), (10.5, 26.5)]:
+        add("furniture", px - 0.45, py - 0.45, px + 0.45, py + 0.45,
+            0.0, 0.80, tag="planter", material="concrete")
+
+    # --- DEFECT: information screen hung above cane sweep -----------
+    # Sits clear of the body band, so the floor beneath it reads as
+    # perfectly walkable, and low enough to strike a standing head. A
+    # cane sweeps the ground and never finds it.
+    add("soffit", 15.4, H - 0.55, 17.4, H - 0.2, 1.55, 1.95,
+        tag="info_screen", material="soffit")
+    gt.append(dict(id="screen_1550mm", type="head_clearance",
+                   pos=[16.4, H - 0.38], measured_in=round(1.55 / IN, 1),
+                   blocks=["vision_impaired_cane"],
+                   note="Wall-hung screen projecting 350 mm with its "
+                        "underside at 1550 mm; ADA 307.2 limits projection "
+                        "to 100 mm between 685 and 2030 mm."))
+
+    # ================= cross wall at x = 22 =================
+    XW = 22.0
+    for (a, b) in [(0.2, 3.0), (4.2, 5.6), (6.3, 13.0), (17.0, 21.0),
+                   (22.4, 29.8)]:
         wall_x(XW, a, b, tag="cross")
     header(XW, 3.0, XW + 0.2, 4.2)
     header(XW, 5.6, XW + 0.2, 6.3)
-    header(XW, 10.0, XW + 0.2, 13.0, z0=2.30)
-    header(XW, 17.2, XW + 0.2, 18.6)   # 1.4 m double leaf
+    header(XW, 13.0, XW + 0.2, 17.0, z0=2.40)     # 4 m corridor mouth
+    header(XW, 21.0, XW + 0.2, 22.4)              # 1.4 m reading room door
 
-    # Meeting Room B is the control: a 900 mm door, level threshold,
-    # generous turning space. Not every room here is broken, and the
-    # analysis has to be able to say so.
-    rooms.append({"name": "Meeting Room B", "x0": XW + 0.2, "y0": 14.85,
-                  "x1": 18.9, "y1": 21.8, "z": 0.0})
-
-    # --- DEFECT 1: community room door A, 0.70 m clear (27.6 in) -------
+    # --- DEFECT: community room door A, 700 mm clear -----------------
     gt.append(dict(id="door_a_700mm", type="clearance_width",
                    pos=[XW + 0.1, 5.95], measured_in=round(0.70 / IN, 1),
                    blocks=["wheelchair", "vision_impaired_cane"],
-                   note="Leaf-to-stop clear width 700 mm; ADA requires 815 mm."))
-
-    # --- DEFECT 2: door B is wide, but sits on a 200 mm threshold ------
+                   note="Leaf-to-stop clear width 700 mm; ADA 404.2.3 "
+                        "requires 815 mm."))
+    # --- DEFECT: door B is wide, and sits on a 200 mm upstand --------
     add("curb", XW - 0.15, 3.0, XW + 0.35, 4.2, 0.0, 0.20,
         tag="threshold", material="concrete")
     gt.append(dict(id="door_b_threshold_200mm", type="step_height",
                    pos=[XW + 0.1, 3.6], measured_in=round(0.20 / IN, 1),
                    blocks=["wheelchair", "sidewalk_delivery_robot"],
-                   note="1200 mm opening, unusable: 200 mm upstand at the sill."))
+                   note="1200 mm opening, unusable: 200 mm upstand at the "
+                        "sill."))
 
-    # ---------------- community room: the island ----------------
-    # Interior deliberately impeccable -- this is the finding.
-    wall_y(9.0, XW, 22.2, tag="community")
-    wall(22.0, 0.2, 22.2, 9.2, tag="community")
-    rooms.append({"name": "Community Room", "x0": XW + 0.2, "y0": 0.2,
-                  "x1": 22.0, "y1": 9.0, "z": 0.0})
+    # ================= spine corridor =================
+    room("Corridor", XW + 0.2, 13.0, W - 0.2, 17.0)
+    # South side: the community room deliberately gets NO corridor door.
+    # Its only two ways in are the 700 mm leaf and the 200 mm threshold,
+    # which is what makes it an island rather than merely awkward.
+    wall_y(12.8, XW, 36.0, tag="corridor_s")
+    wall_y(12.8, 37.4, W - 0.2, tag="corridor_s")
+    header(36.0, 12.8, 37.4, 13.0)     # auditorium door, 1.4 m
+    # North side: WC, lift and reading room doors, then open to the
+    # gallery from x = 31.0 east.
+    for (a, b) in [(XW, 22.9), (24.1, 25.9), (27.5, 28.0), (29.4, 31.0)]:
+        wall_y(17.0, a, b, tag="corridor_n")
+    header(22.9, 17.0, 24.1, 17.2)     # WC door
+    header(25.9, 17.0, 27.5, 17.2)     # lift doors
+    header(28.0, 17.0, 29.4, 17.2)     # reading room door, 1.4 m
 
-    # ---------------- spine corridor ----------------
-    # south wall of corridor is the community-room wall above;
-    # north wall carries the WC entrance.
-    rooms.append({"name": "Corridor", "x0": XW + 0.2, "y0": 9.2, "x1": 31.8,
-                  "y1": 13.0, "z": 0.0})
-    for (a, b) in [(XW, 15.9), (16.9, 19.0)]:
-        wall_y(13.0, a, b, tag="corridor_n")
-    header(16.0, 13.0, 16.9, 13.2)
+    # ================= community room: the island =================
+    room("Community Room", XW + 0.2, 0.4, 31.8, 12.8)
+    wall_x(31.8, 0.2, 12.9, tag="community")
 
-    # ---------------- accessible WC ----------------
-    # A 2.1 x 1.45 m compartment. It is signed accessible, has a 1.0 m
-    # door and a grab rail, and every fixture is correctly mounted --
-    # and there is still nowhere to turn a wheelchair around. This is
-    # the single most common real failure and it never shows up on a
-    # door-width checklist.
-    wall(15.0, 13.0, 15.2, 14.85, tag="wc")
-    wall(17.3, 13.0, 17.5, 14.85, tag="wc")
-    wall(15.0, 14.65, 17.5, 14.85, tag="wc")
-    rooms.append({"name": "Accessible WC", "x0": 15.2, "y0": 13.2,
-                  "x1": 17.3, "y1": 14.65, "z": 0.0})
+    # ================= auditorium =================
+    room("Auditorium", 32.2, 0.4, W - 0.4, 12.8)
+    # Fixed seating laid out to a seat count. Rows are generous, the
+    # cross aisle is not, and nowhere in the room is there a clear space
+    # for somebody who brings their own seat.
+    # Stage at the far end, seating between it and the door, and a clear
+    # circulation zone inside the entrance -- the way a room like this is
+    # actually laid out. The failure is not that it is cramped; it is
+    # that the layout was drawn to a seat count.
+    add("furniture", 33.0, 0.6, 43.0, 2.2, 0.0, 0.45, tag="stage",
+        material="timber")
+    for r in range(6):
+        yy = 3.4 + r * 1.30
+        for c in range(7):
+            xx = 32.7 + c * 0.62
+            add("furniture", xx, yy, xx + 0.50, yy + 0.55, 0.0, 0.92,
+                tag="seat", material="fabric")
+        for c in range(7):
+            xx = 37.77 + c * 0.62
+            add("furniture", xx, yy, xx + 0.50, yy + 0.55, 0.0, 0.92,
+                tag="seat", material="fabric")
+    gt.append(dict(id="auditorium_aisle_850mm", type="clearance_width",
+                   pos=[37.6, 6.0], measured_in=round(0.85 / IN, 1),
+                   blocks=["vision_impaired_cane"],
+                   note="850 mm cross aisle between seat blocks, and no "
+                        "clear space anywhere for a wheelchair user; "
+                        "ADA 221 requires designated spaces."))
 
-    # fixtures eat the clear floor space
-    add("fixture", 16.55, 13.95, 17.30, 14.65, 0.0, 0.42,
+
+    # ================= accessible WC =================
+    room("Accessible WC", 22.2, 17.2, 24.4, 18.65)
+    wall_x(22.0, 17.2, 18.85, tag="wc")
+    wall_x(24.4, 17.0, 18.85, tag="wc")
+    wall_y(18.65, 22.0, 24.6, tag="wc")
+    add("fixture", 23.65, 17.95, 24.40, 18.65, 0.0, 0.42,
         tag="wc_pan", material="porcelain")
-    add("fixture", 15.20, 14.20, 15.80, 14.65, 0.0, 0.85,
+    add("fixture", 22.20, 18.20, 22.80, 18.65, 0.0, 0.85,
         tag="wc_basin", material="porcelain")
-    add("rail", 17.20, 13.30, 17.30, 14.00, 0.75, 0.85,
+    add("rail", 24.30, 17.30, 24.40, 18.00, 0.75, 0.85,
         tag="grab_rail", material="steel")
-
-    # --- DEFECT 3: WC has fixtures but no turning circle ---------------
     gt.append(dict(id="wc_turning_1300mm", type="turning_radius",
-                   pos=[16.2, 13.85], measured_in=round(1.30 / IN, 1),
+                   pos=[23.2, 17.8], measured_in=round(1.30 / IN, 1),
                    blocks=["wheelchair"],
-                   note="Largest clear circle ~1300 mm; ADA 304.3.1 needs 1525 mm."))
-
-    # --- DEFECT 4: bulkhead dropped over the WC door -------------------
-    add("soffit", 15.0, 12.9, 17.5, 13.9, 1.95, 2.45,
+                   note="Every fixture correctly mounted; largest clear "
+                        "circle ~1300 mm where ADA 304.3.1 needs 1525 mm."))
+    # --- DEFECT: duct bulkhead over the WC entrance ------------------
+    add("soffit", 22.0, 16.9, 24.6, 17.9, 1.95, 2.45,
         tag="wc_bulkhead", material="soffit")
     gt.append(dict(id="soffit_1950mm", type="head_clearance",
-                   pos=[16.25, 13.4], measured_in=round(1.95 / IN, 1),
+                   pos=[23.2, 17.4], measured_in=round(1.95 / IN, 1),
                    blocks=["vision_impaired_cane"],
-                   note="Duct bulkhead at 1950 mm; ADA 307.4 requires 2032 mm."))
+                   note="Duct bulkhead at 1950 mm; ADA 307.4 requires "
+                        "2032 mm."))
 
-    # ---------------- raised gallery, +0.60 m ----------------
-    # The slab is authored as five pieces rather than one rectangle so
-    # the ramp and the stair occupy real pockets in it. A single slab
-    # laid over the whole footprint would sit ON TOP of both, erasing
-    # the only two ways up and turning the entire gallery edge into an
-    # unbroken 600 mm cliff.
+    # ================= lift =================
+    # Specified by capacity, not by footprint: the car takes eight
+    # people standing and cannot turn one wheelchair.
+    room("Lift", 25.9, 17.2, 27.5, 18.6)
+    wall_x(25.7, 17.0, 18.8, tag="lift")
+    wall_x(27.5, 17.0, 18.8, tag="lift")
+    wall_y(18.6, 25.7, 27.7, tag="lift")
+    add("wall", 25.7, 17.0, 25.9, 17.2, 0.0, WALL_H, tag="lift",
+        material="wall")
+    add("fixture", 27.35, 17.25, 27.50, 18.55, 0.90, 1.30,
+        tag="lift_panel", material="steel")
+    gt.append(dict(id="lift_car_1600x1400", type="turning_radius",
+                   pos=[26.7, 17.9], measured_in=round(1.40 / IN, 1),
+                   blocks=["wheelchair"],
+                   note="Car 1600 x 1400 mm. Enough to enter, not enough "
+                        "to turn; ADA 304.3.1 needs a 1525 mm circle."))
+
+    # ================= reading room: the control =================
+    # 1.4 m doors, level threshold, generous turning space. Not every
+    # room here is broken and the analysis has to be able to say so.
+    room("Reading Room", 22.2, 19.1, 30.5, 29.6)
+    wall_x(30.5, 17.2, 29.8, tag="reading")
+    for k in range(6):
+        add("furniture", 22.4, 20.4 + k * 1.5, 22.9, 21.5 + k * 1.5,
+            0.0, 1.80, tag="bookshelf", material="timber")
+    for k in range(5):
+        add("furniture", 29.9, 20.0 + k * 1.6, 30.4, 21.1 + k * 1.6,
+            0.0, 1.80, tag="bookshelf", material="timber")
+    for (tx, ty) in [(26.2, 22.4), (26.2, 26.2)]:
+        add("furniture", tx - 0.9, ty - 0.55, tx + 0.9, ty + 0.55,
+            0.0, 0.74, tag="reading_table", material="timber")
+        for dx in (-0.55, 0.55):
+            add("furniture", tx + dx - 0.22, ty - 1.02, tx + dx + 0.22,
+                ty - 0.58, 0.0, 0.86, tag="cafe_chair", material="timber")
+            add("furniture", tx + dx - 0.22, ty + 0.58, tx + dx + 0.22,
+                ty + 1.02, 0.0, 0.86, tag="cafe_chair", material="timber")
+
+    # ================= gallery, +0.60 m =================
     GZ = 0.60
-    RAMP_X = (19.5, 21.9)          # 2.4 m wide
-    RAMP_Y = (13.0, 17.0)          # 4.0 m run -> 600/4000 = 1:6.7
-    STAIR_X = (23.0, 24.5)
-    STAIR_Y = (13.0, 14.2)
+    RAMP_X = (33.0, 35.4)
+    RAMP_Y = (17.0, 21.0)          # 4.0 m run -> 1:6.7
+    STAIR_X = (36.4, 37.9)
+    STAIR_Y = (17.0, 18.2)
 
+    room("Gallery", 31.0, 17.2, W - 0.4, 29.6, GZ)
+    # Authored as pieces so the ramp and stair occupy real pockets. One
+    # slab laid over the whole footprint would sit on top of both,
+    # erasing the only two ways up.
     for (a, b, c, d) in [
-        (19.0, 13.2, RAMP_X[0], 21.8),          # west of the ramp
-        (RAMP_X[0], RAMP_Y[1], RAMP_X[1], 21.8),  # north of the ramp
-        (RAMP_X[1], 13.2, STAIR_X[0], 21.8),    # between ramp and stair
-        (STAIR_X[0], STAIR_Y[1], STAIR_X[1], 21.8),  # north of the stair
-        (STAIR_X[1], 13.2, 31.8, 21.8),         # east
+        (31.0, 17.2, RAMP_X[0], 29.6),
+        (RAMP_X[0], RAMP_Y[1], RAMP_X[1], 29.6),
+        (RAMP_X[1], 17.2, STAIR_X[0], 29.6),
+        (STAIR_X[0], STAIR_Y[1], STAIR_X[1], 29.6),
+        (STAIR_X[1], 17.2, W - 0.4, 29.6),
     ]:
         add("slab", a, b, c, d, 0.0, GZ, tag="gallery", material="gallery")
+    add("wall", 30.9, 17.2, 31.0, 29.6, GZ, GZ + 1.0, tag="gallery_edge",
+        material="parapet")
 
-    rooms.append({"name": "Gallery", "x0": 19.0, "y0": 13.2, "x1": 31.8,
-                  "y1": 21.8, "z": GZ})
-    for (a, b) in [(13.2, 21.8)]:
-        add("wall", 18.9, a, 19.0, b, GZ, GZ + 1.0, tag="gallery_edge",
-            material="parapet")
-
-    # --- DEFECT 5: the ramp is built at 1:6.7 --------------------------
+    # --- DEFECT: ramp built at 1:6.7 ---------------------------------
     add("ramp", RAMP_X[0], RAMP_Y[0], RAMP_X[1], RAMP_Y[1], 0.0, GZ,
         tag="gallery_ramp", material="ramp", axis="y", rz0=0.0, rz1=GZ)
-    add("rail", RAMP_X[0] - 0.08, RAMP_Y[0], RAMP_X[0], RAMP_Y[1],
-        0.85, 0.95, tag="ramp_rail", material="steel")
-    add("rail", RAMP_X[1], RAMP_Y[0], RAMP_X[1] + 0.08, RAMP_Y[1],
-        0.85, 0.95, tag="ramp_rail", material="steel")
+    for rx in (RAMP_X[0] - 0.08, RAMP_X[1]):
+        add("rail", rx, RAMP_Y[0], rx + 0.08, RAMP_Y[1], 0.85, 0.95,
+            tag="ramp_rail", material="steel")
     gt.append(dict(id="ramp_15pct", type="slope_gradient",
                    pos=[(RAMP_X[0] + RAMP_X[1]) / 2,
                         (RAMP_Y[0] + RAMP_Y[1]) / 2],
                    measured=round(GZ / (RAMP_Y[1] - RAMP_Y[0]), 3),
                    blocks=["wheelchair", "sidewalk_delivery_robot",
                            "vision_impaired_cane"],
-                   note="600 mm rise over 4.0 m run = 1:6.7; ADA 405.2 max 1:12."))
+                   note="600 mm rise over 4.0 m = 1:6.7; ADA 405.2 caps "
+                        "ramps at 1:12."))
 
-    # --- DEFECT 6: the stair is the only other way up ------------------
+    # --- DEFECT: four-riser stair is the only other way up -----------
     for i in range(4):
         add("stair", STAIR_X[0], STAIR_Y[0] + i * 0.30,
             STAIR_X[1], STAIR_Y[0] + (i + 1) * 0.30,
             0.0, (i + 1) * 0.15, tag=f"stair_{i}", material="concrete")
     gt.append(dict(id="stair_4riser_150mm", type="step_height",
-                   pos=[(STAIR_X[0] + STAIR_X[1]) / 2, 13.6],
+                   pos=[(STAIR_X[0] + STAIR_X[1]) / 2, 17.6],
                    measured_in=round(0.15 / IN, 1),
                    blocks=["wheelchair", "sidewalk_delivery_robot"],
-                   note="4 risers at 150 mm. Passable on foot or with a cane; "
-                        "not on wheels."))
+                   note="4 risers at 150 mm. Passable on foot or with a "
+                        "cane; not on wheels."))
 
-    # --- DEFECT 7: unprotected 600 mm drop along the gallery's south edge
+    # --- DEFECT: unprotected 600 mm drop along the gallery edge ------
     gt.append(dict(id="gallery_curb_600mm", type="step_height",
-                   pos=[28.0, 13.25], measured_in=round(GZ / IN, 1),
+                   pos=[39.5, 17.25], measured_in=round(GZ / IN, 1),
                    blocks=["wheelchair", "sidewalk_delivery_robot",
                            "vision_impaired_cane"],
-                   note="Slab edge with no upstand or ramp for 8.9 m."))
+                   note="Slab edge with no upstand or ramp for 5.3 m."))
 
-    # ---------------- cafe: seeded contents ----------------
-    def table(cx, cy, r=0.40):
-        add("furniture", cx - r, cy - r, cx + r, cy + r, 0.0, 0.74,
-            tag="cafe_table", material="timber")
-
-    def chair(cx, cy, r=0.22):
-        add("furniture", cx - r, cy - r, cx + r, cy + r, 0.0, 0.86,
-            tag="cafe_chair", material="timber")
-
-    placed = 0
-    while placed < 9:
-        cx = float(rng.uniform(1.6, 12.6))
-        cy = float(rng.uniform(1.4, 7.6))
-        if any(abs(cx - t[0]) < 2.0 and abs(cy - t[1]) < 2.0
-               for t in [(s.x0 + 0.40, s.y0 + 0.40) for s in S
-                         if s.tag == "cafe_table"]):
-            continue
-        table(cx, cy)
-        for (dx, dy) in [(-0.78, 0), (0.78, 0), (0, -0.78), (0, 0.78)]:
-            if rng.random() < 0.72:
-                chair(cx + dx, cy + dy)
-        placed += 1
-
-    # --- DEFECT 8: two furniture runs leave an 860 mm gap --------------
-    # Planted last so the random tables cannot overwrite it.
-    add("furniture", 7.2, 9.4, 9.6, 10.2, 0.0, 0.75, tag="bench",
-        material="timber")
-    add("furniture", 7.2, 11.06, 9.6, 11.86, 0.0, 0.75, tag="bench",
-        material="timber")
-    gt.append(dict(id="cafe_pinch_860mm", type="clearance_width",
-                   pos=[8.4, 10.63], measured_in=round(0.86 / IN, 1),
-                   blocks=["vision_impaired_cane"],
-                   note="860 mm between two benches. Architecture is fine; "
-                        "the furniture is not."))
-
-    # reception desk + lobby seating
-    add("furniture", 11.4, 15.2, 13.4, 16.4, 0.0, 1.05, tag="reception",
-        material="timber")
+    # gallery contents
     for k in range(4):
-        add("furniture", 9.4 + k * 0.95, 18.4, 10.0 + k * 0.95, 19.4,
-            0.0, 0.86, tag="lobby_seat", material="fabric")
+        add("furniture", 33.4 + k * 2.6, 27.6, 34.6 + k * 2.6, 28.0,
+            GZ, GZ + 1.9, tag="display_panel", material="timber")
+    for k in range(3):
+        add("furniture", 40.4, 19.4 + k * 2.4, 42.4, 20.0 + k * 2.4,
+            GZ, GZ + 0.95, tag="display_case", material="steel")
 
-    # ---------------- planters, columns (structure, not clutter) -------
-    for cx in (9.0, 18.0, 26.0):
-        add("wall", cx - 0.22, 6.4, cx + 0.22, 6.84, 0.0, WALL_H,
-            tag="column", material="concrete")
-
+    # Goals sit on open floor by construction. reaches() tests the goal
+    # cell directly without snapping, so a destination parked 200 mm from
+    # a display case would read as unreachable for everybody.
     goals = {
-        "community_room": (18.0, 5.2),
-        "gallery": (27.0, 18.0),
-        "restroom": (16.2, 13.6),
-        "east_end": (30.0, 11.0),
+        "community_room": (27.0, 6.5),
+        "gallery": (42.2, 27.0),
+        "restroom": (23.1, 17.6),
+        "auditorium": (37.4, 11.8),
+        "reading_room": (26.2, 24.4),
     }
 
-    return World(solids=S, spawn_m=(1.8, 11.0), goals_m=goals, gt=gt,
+    return World(solids=S, spawn_m=(2.2, 15.0), goals_m=goals, gt=gt,
                  rooms=rooms, seed=seed)
 
 
