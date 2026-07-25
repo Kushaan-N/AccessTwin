@@ -55,7 +55,8 @@ GOAL_LABELS = {
     "community_room": "Community Room",
     "gallery": "Gallery",
     "restroom": "Accessible WC",
-    "east_end": "East end of corridor",
+    "auditorium": "Auditorium",
+    "reading_room": "Reading Room",
 }
 
 
@@ -280,7 +281,8 @@ def score_recall(w, grid, profiles, free, cell):
                 found.append((b["kind"], b["pos"][0], b["pos"][1],
                               "route:" + pr["name"], None))
 
-    sweep_raw = sweep(grid, free, cell, rooms=w.rooms, spawn=w.spawn)
+    sweep_raw = sweep(grid, free, cell, rooms=w.rooms, spawn=w.spawn,
+                      solids=w.solids)
     for f in sweep_raw:
         found.append((f["type"], f["pos"][0], f["pos"][1],
                       "sweep:" + f["agent"], f.get("bbox")))
