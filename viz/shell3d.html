@@ -137,6 +137,23 @@
   font-variant-numeric:tabular-nums;font-weight:600}
 .chip.on{color:var(--ink);background:var(--panel);border-color:var(--rule)}
 
+.boot{position:absolute;inset:0;display:flex;align-items:center;
+  justify-content:center;gap:10px;background:var(--stage-bg);z-index:8;
+  font-family:var(--mono);font-size:12px;color:var(--ink-3);
+  letter-spacing:.06em}
+.boot span{width:11px;height:11px;border:2px solid var(--rule);
+  border-top-color:var(--accent);border-radius:50%;
+  animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.boot span{animation:none}}
+.boot[hidden]{display:none}
+.nogl{position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:8px;padding:24px;
+  text-align:center;background:var(--stage-bg);z-index:9}
+.nogl[hidden]{display:none}
+.nogl h3{margin:0;font-size:15px}
+.nogl p{margin:0;font-size:13px;color:var(--ink-2);max-width:44ch}
+
 .cpsum{position:absolute;left:12px;top:12px;display:flex;gap:8px;
   flex-wrap:wrap;pointer-events:none;z-index:4}
 .cpsum b{font-family:var(--mono);font-size:11.5px;font-weight:600;
@@ -204,6 +221,12 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--panel);
 
   <div class="body">
     <div class="viewport">
+      <div id="boot" class="boot"><span></span>Building the model…</div>
+      <div id="nogl" class="nogl" hidden>
+        <h3>This device can&rsquo;t run WebGL</h3>
+        <p>The 3D walkthrough needs hardware acceleration. Every finding
+          is available as text below &mdash; open <em>Findings, as text</em>.</p>
+      </div>
       <div id="stage" tabindex="0" role="application"
            aria-label="3D walkthrough. Use left and right arrow keys to change scene, or read the text findings below."></div>
       <div id="cpsum" class="cpsum" hidden></div>
@@ -270,7 +293,8 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--panel);
     <button id="prev">&larr;</button>
     <button id="next">&rarr;</button>
     <span>drag to orbit · scroll to zoom · <kbd>Space</kbd> restart
-      · <kbd>&larr;</kbd><kbd>&rarr;</kbd> scenes</span>
+      · <kbd>&larr;</kbd><kbd>&rarr;</kbd> scenes · <kbd>1</kbd>&ndash;<kbd>9</kbd>
+      jump · <kbd>P</kbd> pause</span>
     <span class="sp" id="run"></span>
   </footer>
 </div>
