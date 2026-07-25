@@ -1,0 +1,13 @@
+# Vercel falls back to .gitignore when this file is absent, and that
+# ignores out/ -- which is the only directory worth deploying. Listing
+# the sources here instead keeps the upload to the built page.
+.git
+.gitignore
+__pycache__
+*.pyc
+core
+viz
+vendor
+legacy
+submission
+README.md
