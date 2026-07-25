@@ -127,6 +127,22 @@ function buildMaterials() {
   MAT.header    = mk(TOK.wall, 0.95, 0, SURF.plaster, 4);
   MAT.glass     = mk(TOK.glass, 0.06, 0.10, null, 1, {
     transparent: true, opacity: 0.16, side: THREE.DoubleSide });
+
+  // Floor finishes get their own material so carpet actually reads as
+  // carpet in the ordinary render, not only under the material overlay.
+  // Deep pile takes a stronger normal and a rougher surface, which is
+  // most of what separates it visually from the low-pile next to it.
+  (D.surfaces || []).forEach(sf => {
+    const kit = sf.name.startsWith("carpet") ? SURF.fabric
+      : sf.name === "timber" ? SURF.wood
+      : sf.name === "tile" ? SURF.tile : SURF.concrete;
+    const deep = sf.name === "carpet_deep";
+    const m = mk(sf.color, deep ? 1.0 : sf.name.startsWith("carpet") ? 0.95
+                 : 0.72, 0, kit, deep ? 26 : 14);
+    if (m.normalScale) m.normalScale.set(deep ? 1.5 : 0.7, deep ? 1.5 : 0.7);
+    m.envMapIntensity = deep ? 0.25 : (TOK.dark ? 0.8 : 1.0);
+    MAT["surf_" + sf.name] = m;
+  });
 }
 buildMaterials();
 
@@ -169,7 +185,10 @@ function buildSolids() {
   D.solids.forEach(s => {
     const w = s.x1 - s.x0, d = s.y1 - s.y0, h = s.z1 - s.z0;
     if (w <= 0 || d <= 0 || h <= 0) return;
-    const mat = MAT[s.material] || MAT.wall;
+    // Only slabs take a finish material: a ramp with a concrete surface
+    // is still a ramp and keeps its own colour.
+    const mat = (s.kind === "slab" && s.surface && MAT["surf_" + s.surface])
+      || MAT[s.material] || MAT.wall;
     let mesh;
     const furn = (s.kind === "furniture" || s.kind === "fixture")
       ? makeFurniture(THREE, s, MAT) : null;
@@ -269,7 +288,7 @@ const decalMat = new THREE.MeshBasicMaterial({
 const decalGroup = new THREE.Group();
 // Two planes: ground level, and the raised gallery, so the tint sits on
 // whichever floor is actually there.
-[[0.012, 0, 0, BW, BH], [0.612, 19.0, 13.2, 12.8, 8.6]].forEach(
+[[0.012, 0, 0, BW, BH], [0.612, 31.0, 17.2, 12.6, 12.4]].forEach(
   ([z, x0, y0, w, h], k) => {
     const g = new THREE.PlaneGeometry(w, h);
     const uv = g.attributes.uv;
@@ -416,7 +435,8 @@ if (surfMat) {
       const g = new THREE.PlaneGeometry(w, h);
       const uv = g.attributes.uv;
       for (let i = 0; i < uv.count; i++) {
-        uv.setXY(i, (x0 + uv.getX(i) * w) / BW, (y0 + uv.getY(i) * h) / BH);
+        uv.setXY(i, (x0 + uv.getX(i) * w) / BW,
+                 (y0 + (1 - uv.getY(i)) * h) / BH);
       }
       uv.needsUpdate = true;
       const m = new THREE.Mesh(g, surfMat);
@@ -435,14 +455,11 @@ function surfaceLegend() {
   const rows = SURFDEFS.map((sf, i) => ({ sf, i }))
     .filter(r => present.has(r.i))
     .map(({ sf }) => {
-      const stops = D.profiles.filter(p => {
-        if (p.name === "baseline_walking") return false;
-        const need = p.name !== "vision_impaired_cane";
-        return (need && !sf.firm) || sf.pile_mm > (p.name === "wheelchair" ? 13 : p.name === "sidewalk_delivery_robot" ? 8 : 30)
-          || sf.opening_mm > (p.name === "wheelchair" ? 13 : p.name === "sidewalk_delivery_robot" ? 10 : 40);
-      }).map(p => p.label);
+      // Straight from the exported data, which the nav grid derived from
+      // the same predicate. Recomputing it here is how it went wrong.
+      const stops = (sf.blocks || []).map(n => (P[n] && P[n].label) || n);
       return `<span><i style="background:${sf.color}"></i>${sf.label}` +
-        (stops.length ? `<b>stops ${stops.length}</b>` : "") + `</span>`;
+        (stops.length ? `<b>stops ${stops.join(", ")}</b>` : "") + `</span>`;
     });
   el("roomstate").innerHTML = rows.join("");
 }
@@ -924,7 +941,7 @@ function journeyOf(pname, goal) { return P[pname].journeys[goal]; }
 
 const SCENES = [
   {
-    id: "establish", dur: 8.0, kicker: "The building",
+    id: "establish", dur: 9.0, kicker: "The building",
     cap: `A generated civic centre — lobby, café, spine corridor, community
           room, accessible WC and a raised gallery. It is drawn to code.
           <em>Eight access defects are planted in it</em>, and every one of them
@@ -942,31 +959,24 @@ const SCENES = [
     }
   },
   {
-    id: "cutaway", dur: 6.0, kicker: "Section",
-    cap: `Same building, walls cut down to knee height so we can watch what
-          happens inside. Four bodies are about to walk it: a walking adult,
-          a wheelchair user, a cane user, and a delivery robot.
-          <em>Only their dimensions differ.</em>`,
-    stat: () => ["4", "body envelopes tested"],
-    enter() { hideAgents(); decalGroup.visible = false; },
-    tick(t) {
-      setWallCut(1.0 - 0.78 * Math.min(1, t / 2.2));
-      lookAt(BW / 2 - 4, -14, 26 - t * 1.2, BW / 2, BH / 2, 0.8);
-    }
-  },
-  {
-    id: "walker", dur: 12.0, kicker: "Walking adult", profile: "baseline_walking",
+    id: "walker", dur: 13.0, kicker: "Walking adult", profile: "baseline_walking",
     cap: `A walking adult reaches <em>every room in the building</em> —
           ${n0(P.baseline_walking.reach_m2, 0)} m², 100% of the floor.
           The community room, the gallery, the WC: all connected.
           This is the building as its drawings describe it.`,
     stat: () => ["100%", "of the floor reached"],
-    walk: [["baseline_walking", "community_room", 0], ["baseline_walking", "gallery", 5.2]],
-    enter() { hideAgents(); decalGroup.visible = false; setWallCut(0.22); },
-    tick(t) { follow("baseline_walking", t, 16, -6, 9); }
+    walk: [["baseline_walking", "community_room", 0],
+           ["baseline_walking", "gallery", 6.0]],
+    enter() { hideAgents(); decalGroup.visible = false; },
+    tick(t) {
+      // Walls drop to knee height over the first two seconds, which the
+      // cut-away scene used to do on its own.
+      setWallCut(1.0 - 0.78 * Math.min(1, t / 2.0));
+      follow("baseline_walking", t, 16, -6, 9);
+    }
   },
   {
-    id: "chair-room", dur: 12.5, kicker: "Wheelchair · community room",
+    id: "chair-room", dur: 17.0, kicker: "Wheelchair · community room",
     profile: "wheelchair",
     cap: () => {
       const b = (journeyOf("wheelchair", "community_room").barriers || [])[0];
@@ -995,28 +1005,7 @@ const SCENES = [
     }
   },
   {
-    id: "chair-gallery", dur: 12.0, kicker: "Wheelchair · gallery",
-    profile: "wheelchair",
-    cap: `The gallery has a ramp, so it looks solved. The ramp is built at
-          <em>1:6.7</em> where the code allows 1:12, and the only other way up
-          is a four-riser stair. The wheelchair gets to the bottom of the ramp
-          and <em>that is as far as the building lets it go</em>.`,
-    stat: () => [n0(P.wheelchair.island_m2, 0) + " m²", "stranded from this body"],
-    walk: [["wheelchair", "gallery", 0]],
-    enter() { hideAgents(); decalGroup.visible = false; setWallCut(0.22); },
-    tick(t) { follow("wheelchair", t, 10, 6, 7); },
-    onStop(pname, goal) {
-      (journeyOf(pname, goal).barriers || []).slice(0, 2).forEach(b => {
-        addMarker(b.pos[0], b.pos[1], b.pos[2],
-          b.kind === "slope_gradient" ? `1:${n0(1 / Math.max(b.slope, 1e-3))}`
-            : `${n0(b.step_in, 1)}" step`,
-          b.kind === "slope_gradient" ? "needs 1:12 — ADA 405.2"
-            : "needs ½\" — ADA 303.2", TOK.bad);
-      });
-    }
-  },
-  {
-    id: "eye", dur: 11.0, kicker: "At eye level", profile: "wheelchair",
+    id: "eye", dur: 14.0, kicker: "At eye level", profile: "wheelchair",
     cap: `The same approach, from the chair. <em>Nothing about this view is
           unusual until it stops.</em> That is the point: the failure is not
           visible from the corridor, it is not visible on the drawing, and it
@@ -1067,7 +1056,7 @@ const SCENES = [
     }
   },
   {
-    id: "islands", dur: 10.0, kicker: "The finding",
+    id: "islands", dur: 13.0, kicker: "The finding",
     cap: `Those two regions are <em>geometrically flawless inside</em> — wide,
           dead flat, with turning circles to spare. They are also completely
           unreachable in a wheelchair. <em>No clearance-based audit flags a room
@@ -1088,7 +1077,7 @@ const SCENES = [
     }
   },
   {
-    id: "cane", dur: 11.0, kicker: "Cane user · WC", profile: "vision_impaired_cane",
+    id: "cane", dur: 12.0, kicker: "Cane user · WC", profile: "vision_impaired_cane",
     cap: `A cane sweeps a 42-inch arc — <em>wider than a wheelchair</em>. It
           clears the corridor, then meets a bulkhead dropped to 1 950 mm over
           the accessible WC door. <em>The WC excludes two different people for
@@ -1109,7 +1098,7 @@ const SCENES = [
     }
   },
   {
-    id: "robot", dur: 10.0, kicker: "Delivery robot",
+    id: "robot", dur: 11.0, kicker: "Delivery robot",
     profile: "sidewalk_delivery_robot",
     cap: `A 26-inch delivery robot goes <em>straight through the door that
           excluded the wheelchair</em>. It is narrow enough. The same building
@@ -1122,34 +1111,15 @@ const SCENES = [
     tick(t) { follow("sidewalk_delivery_robot", t, 9, -5, 6); }
   },
   {
-    id: "heat", dur: 9.0, kicker: "Exclusion map",
-    cap: `All four bodies at once — every square metre coloured by
-          <em>how many of them can stand on it</em>. Teal is universal, red is
-          walking-adult only. The building is not accessible or inaccessible;
-          it is accessible to a shrinking subset as bodies get wider.`,
-    stat: () => [n0(100 - POP.pct_full_access, 0) + "%",
-                 "of a mobility population excluded"],
-    enter() {
-      hideAgents(); clearMarkers();
-      decalGroup.visible = true; paintDecal("heat", null, false);
-      setWallCut(0.16);
-      lookAt(BW / 2, -6, 34, BW / 2, BH / 2, 0);
-    },
-    tick(t) {
-      lookAt(BW / 2 + Math.sin(t * 0.28) * 8, -6 + t * 0.3, 34,
-             BW / 2, BH / 2, 0);
-    }
-  },
-  {
-    id: "materials", dur: 14.0, kicker: "What the floor is made of",
+    id: "materials", dur: 15.0, kicker: "What the floor is made of",
     cap: `Geometry is not the only rule. <em>ADA 302 governs the floor
-          itself</em> — firm, stable, pile under 13 mm, openings under
-          13 mm. Deep-pile carpet in the auditorium, a services grating
-          across the gallery, gravel and setts in the courtyard: every one
-          is level, wide and compliant on every dimension, and every one
-          stops a castor dead. <em>This is the axis where the cane user
-          out-performs the wheelchair</em> — feet cross gravel, wheels do not.`,
-    stat: () => ["ADA 302", "surfaces: firm, stable, slip-resistant"],
+          itself</em>, and pile over 13 mm fails it. The auditorium is
+          carpeted at 22 mm: level, wide, generous, compliant on every
+          dimension a tape measure reaches — and <em>it stops a wheelchair
+          and nothing else</em>. The cane user walks across it. The
+          delivery robot rides over it on bigger wheels. Only the
+          100 mm front castors of a manual chair dig in and stop.`,
+    stat: () => ["22 mm", "pile, where ADA 302.2 allows 13"],
     materials: true,
     enter() {
       hideAgents(); clearMarkers(); decalGroup.visible = false;
@@ -1167,37 +1137,7 @@ const SCENES = [
     }
   },
   {
-    id: "contents", dur: 10.0, kicker: "The building, or what is in it",
-    cap: () => {
-      const c = D.counterfactual;
-      if (!c) return "";
-      const wc = c.profiles.wheelchair, cn = c.profiles.vision_impaired_cane;
-      return `Regenerate the same building with its contents taken out —
-        same walls, same ramp, same doors. The wheelchair goes from
-        <em>${wc.as_built_pct}% to ${wc.contents_removed_pct}%</em> and the
-        cane user from <em>${cn.as_built_pct}% to
-        ${cn.contents_removed_pct}%</em>. <em>That is ${c.furniture_m2} m² of
-        furniture deciding who can use the building</em>, and none of the
-        rooms that stay shut are shut by it.`;
-    },
-    stat: () => {
-      const c = D.counterfactual;
-      return c ? ["+" + n0(c.profiles.vision_impaired_cane.recovered_pct, 1) +
-                  " pts", "recoverable without touching the building"]
-                : ["—", ""];
-    },
-    enter() {
-      hideAgents(); clearMarkers(); hideChokepoint();
-      decalGroup.visible = true; paintDecal("profile", P.wheelchair, false);
-      cpGroup.visible = false; setWallCut(0.16);
-      lookAt(BW / 2, -5, 33, BW / 2, BH / 2, 0);
-    },
-    tick(t) {
-      lookAt(BW / 2 + Math.sin(t * 0.25) * 7, -5, 33, BW / 2, BH / 2, 0);
-    }
-  },
-  {
-    id: "choke", dur: 22.0, kicker: "Every blockage, priced",
+    id: "choke", dur: 24.0, kicker: "Every blockage, priced",
     cap: `<em>Click any marker.</em> Each blockage carries a verdict: move
           the furniture and it costs nothing; re-lay fixed seating or widen
           an opening and it costs money; or — the case a two-way split
@@ -1233,7 +1173,7 @@ const SCENES = [
     }
   },
   {
-    id: "fix", dur: 12.0, kicker: "Cheapest repair",
+    id: "fix", dur: 13.0, kicker: "Cheapest repair",
     cap: chosen ? `Every candidate repair is scored by <em>rebuilding the
           building and re-running the whole population through it</em>. With
           $${OPT.budget_usd.toLocaleString()} the optimum is
@@ -1267,7 +1207,7 @@ const SCENES = [
     }
   },
   {
-    id: "truth", dur: 10.0, kicker: "Scored against truth",
+    id: "truth", dur: 11.0, kicker: "Scored against truth",
     cap: `Because the building is generated, an answer key exists.
           <em>${REC.planted} defects planted, ${REC.detected} recovered</em> by
           an analysis that was never told where to look — it found them by
