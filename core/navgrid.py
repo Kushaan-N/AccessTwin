@@ -13,7 +13,9 @@ from schema import MobilityAgentProfile
 
 class NavGrid:
     def __init__(self, free: np.ndarray, height: np.ndarray, cell: float,
-                 ceiling: np.ndarray | None = None):
+                 ceiling: np.ndarray | None = None,
+                 surface: np.ndarray | None = None,
+                 surface_order: list | None = None):
         """free: bool, True = unobstructed. height: metres. cell: m/cell.
 
         ceiling: underside of anything overhead, in metres. Optional --
@@ -29,6 +31,12 @@ class NavGrid:
         self.ceiling = ceiling
         self.headroom = (None if ceiling is None
                          else (ceiling - height).astype(np.float32))
+        # Floor finish per cell. Optional for the same reason as ceiling:
+        # a world with no material data simply is not checked against
+        # ADA 302, rather than being checked wrongly.
+        self.surface = surface
+        self.surface_order = surface_order
+        self._surf_cache = {}
 
         # Distance from every free cell to the nearest obstruction.
         # clearance*2 == local corridor width. This IS the clearance
@@ -65,7 +73,25 @@ class NavGrid:
         )
         if self.headroom is not None and p.head_clearance_in:
             mask = mask & (self.headroom >= p.head_clearance_in / 39.3701)
+        if self.surface is not None and self.surface_order:
+            mask = mask & self.surface_mask(p)
         return mask
+
+    def surface_mask(self, p: MobilityAgentProfile) -> np.ndarray:
+        """Cells whose floor finish this body can actually cross.
+
+        Built by looking up each finish once and painting the verdict
+        across the raster, rather than evaluating per cell.
+        """
+        from schema import SURFACES, surface_ok
+        if p.name in self._surf_cache:
+            return self._surf_cache[p.name]
+        ok = np.ones(len(self.surface_order), dtype=bool)
+        for i, name in enumerate(self.surface_order):
+            ok[i] = surface_ok(p, SURFACES[name])[0]
+        m = ok[self.surface]
+        self._surf_cache[p.name] = m
+        return m
 
     @staticmethod
     def snap(mask: np.ndarray, pt: tuple[int, int]) -> tuple[int, int]:
