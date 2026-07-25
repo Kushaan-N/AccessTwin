@@ -226,13 +226,17 @@ def main():
                              for g, c in goals.items()}
 
     cf = counterfactual(args.seed, spawn, cell)
+    chokes = chokepoints(w, grid, spawn, cell, profiles, opt,
+                         seed=args.seed)
     sweepw = width_sweep(w, grid, spawn, cell)
     recall = score_recall(w, grid, profiles, free, cell)
 
     scene = w.to_scene()
     scene.update({
         "seed": args.seed,
-        "grid": {"nx": free.shape[0], "ny": free.shape[1], "cell": cell},
+        "grid": {"nx": free.shape[0], "ny": free.shape[1], "cell": cell,
+                 "mask_nx": free[::2, ::2].shape[0],
+                 "mask_ny": free[::2, ::2].shape[1]},
         "goal_labels": GOAL_LABELS,
         "profiles": profiles,
         "breaking_point": bp,
@@ -244,8 +248,9 @@ def main():
         "width_sweep": sweepw,
         "counterfactual": cf,
         "surface_grid": encode_surface(surf),
-        "chokepoints": chokepoints(w, grid, spawn, cell, profiles, opt,
-                                   seed=args.seed),
+        "chokepoints": chokes,
+        "issues": audit_issues(w, grid, free, cell, chokes, profiles,
+                               seed=args.seed),
     })
 
     os.makedirs(os.path.join(ROOT, "out"), exist_ok=True)
@@ -448,6 +453,163 @@ def chokepoints(w, grid, spawn, cell, profiles, opt, seed=7):
     return out
 
 
+# Illustrative remedies for findings the route-based optimiser never
+# nominates, because they exclude somebody without disconnecting a goal.
+REMEDY = {
+    "floor_surface": ("Replace with a hard finish or low-pile carpet",
+                      "area", 65.0),
+    "counter_height": ("Drop a 865 mm section into the counter run",
+                       "flat", 1400.0),
+    "head_clearance": ("Raise the obstruction clear of 2032 mm",
+                       "flat", 2200.0),
+    "turning_radius": ("Enlarge the compartment to take a 1525 mm circle",
+                       "flat", 8500.0),
+    "clearance_width": ("Widen the opening", "flat", 3200.0),
+    "step_height": ("Ramp the level change at 1:14", "flat", 2400.0),
+    "slope_gradient": ("Regrade the run to 1:14", "flat", 2600.0),
+}
+
+
+def audit_issues(w, grid, free, cell, chokes, profiles, seed=7,
+                 cap=30):
+    """One worklist: every finding, what fixes it, and what that costs.
+
+    The walkthrough is a story and only needs the barriers that stop
+    somebody mid-route. An auditor wants the other kind too -- the
+    carpet, the counter, the turning circle -- which exclude people
+    without disconnecting anything, so no route-based search ever
+    nominates them.
+
+    The hard part is not gathering findings, it is refusing to list
+    them all. A raw sweep produces 80-odd clearance hits, nearly all
+    of them gaps between a chair and a table, and a worklist with 83
+    identical "widen the opening" rows is worse than no worklist.
+    So: cluster at 2 m, drop clearance pinches that are made of
+    furniture rather than building, name the room, and cap the list.
+    """
+    from sweep import sweep as run_sweep, group as group_sweep
+    issues = []
+
+    for c in chokes:
+        issues.append({**c, "source": "route", "remedy": c["detail"],
+                       "room": nearest_room(w, c["pos"][0], c["pos"][1]),
+                       "title": ("Blocked by loose furniture"
+                                 if c["verdict"] == "move" else
+                                 "Blocked by fixed furniture"
+                                 if c["verdict"] == "reconfigure" else
+                                 "One of several barriers"
+                                 if c["verdict"] == "combined" else
+                                 "Blocked by the building")})
+
+    # Furniture footprint, so a gap between two chairs is not billed as
+    # a structural opening.
+    fe = build3d(seed, with_contents=False).rasterize()[0]
+    furn = fe & ~free
+    fdist = ndimage.distance_transform_edt(~furn, sampling=cell) \
+        if furn.any() else np.full(free.shape, np.inf)
+
+    raw = run_sweep(grid, free, cell, rooms=w.rooms, spawn=w.spawn,
+                    solids=w.solids)
+
+    # Merge on extent, not on a representative point. A 6.8 m counter or
+    # a 12 m ramp is reported once per profile and each profile's worst
+    # cell lands at a different end, so point-distance merging leaves
+    # three rows for one thing to fix.
+    merged = []
+    for g in group_sweep(raw, cell=2.0):
+        bb = g.get("bbox")
+        hit = None
+        for m in merged:
+            if m["type"] != g["type"]:
+                continue
+            mb = m.get("bbox")
+            if bb and mb and not (bb[2] < mb[0] - 1.0 or bb[0] > mb[2] + 1.0
+                                  or bb[3] < mb[1] - 1.0 or bb[1] > mb[3] + 1.0):
+                hit = m
+                break
+            if not bb or not mb:
+                if (abs(g["pos"][0] - m["pos"][0]) <= 2.0
+                        and abs(g["pos"][1] - m["pos"][1]) <= 2.0):
+                    hit = m
+                    break
+        if hit:
+            hit["agents"] = sorted(set(hit.get("agents", []))
+                                   | set(g.get("agents", [])))
+            hit["area_m2"] = round(hit.get("area_m2", 0)
+                                   + g.get("area_m2", 0), 1)
+            if bb and hit.get("bbox"):
+                hit["bbox"] = [min(bb[0], hit["bbox"][0]),
+                               min(bb[1], hit["bbox"][1]),
+                               max(bb[2], hit["bbox"][2]),
+                               max(bb[3], hit["bbox"][3])]
+        else:
+            merged.append(dict(g))
+
+    minor = 0
+    for g in merged:
+        px, py = g["pos"]
+        kind = g["type"]
+        # Same place is not the same problem: a relocatable bench and a
+        # carpet that stops a castor can share a room, and folding one
+        # into the other loses the finding entirely.
+        if any(abs(px - c["pos"][0]) <= 2.0 and abs(py - c["pos"][1]) <= 2.0
+               and c.get("kind") == kind for c in chokes):
+            continue
+        ix, iy = int(round(px / cell)), int(round(py / cell))
+        if kind == "clearance_width":
+            # Made of furniture, not building: already covered by the
+            # relocate entries, and not a construction job.
+            if fdist[min(ix, fdist.shape[0] - 1),
+                     min(iy, fdist.shape[1] - 1)] < 0.9:
+                minor += 1
+                continue
+        label, mode, unit = REMEDY.get(kind, ("Investigate on site",
+                                              "flat", 0.0))
+        area = g.get("area_m2", 0.0)
+        cost = max(round(unit * area), 400) if mode == "area" else round(unit)
+        room = nearest_room(w, px, py)
+        meas = g.get("measured_in", 0) or 0
+        if kind == "floor_surface":
+            detail = (f"{label} — {area:.0f} m² of "
+                      f"{g.get('surface_label', 'finish')}")
+        elif kind == "counter_height":
+            detail = f"{label} — the run is at {meas:.0f}in today"
+        elif kind == "turning_radius":
+            detail = f"{label} — {meas:.0f}in circle today, 60in required"
+        elif kind == "head_clearance":
+            detail = f"{label} — {meas:.0f}in today, 80in required"
+        elif kind == "clearance_width":
+            detail = f"{label} — {meas:.0f}in clear today"
+        else:
+            detail = label
+        issues.append({
+            "id": f"sweep:{kind}@{px:.1f},{py:.1f}",
+            "kind": kind, "verdict": "build", "source": "sweep",
+            "pos": [px, py], "detail": detail, "remedy": detail,
+            "cost": cost, "room": room,
+            "excludes": sorted(set(g.get("agents", []))),
+            "goals_blocked": [], "opens_alone": [], "gain_pct": 0.0,
+            "chosen": False, "area_m2": area,
+            "title": "Excludes without disconnecting",
+        })
+
+    order = {"move": 0, "reconfigure": 1, "combined": 2, "build": 3}
+    issues.sort(key=lambda d: (order.get(d["verdict"], 9),
+                               -len(d.get("excludes", [])), d["cost"]))
+    # The cap only trims sweep extras. A route barrier is something a
+    # body actually hit, and dropping one to fit a list length would be
+    # hiding the finding that matters most.
+    keep = [d for d in issues if d["source"] == "route"]
+    extra = [d for d in issues if d["source"] != "route"]
+    room = max(0, cap - len(keep))
+    minor += max(0, len(extra) - room)
+    issues = sorted(keep + extra[:room],
+                    key=lambda d: (order.get(d["verdict"], 9), d["cost"]))
+    for it in issues:
+        it["minor_folded"] = minor
+    return issues
+
+
 def width_sweep(w, grid, spawn, cell, lo=18.0, hi=48.0, step=2.0):
     """Which rooms survive, as the body gets wider.
 
@@ -509,9 +671,16 @@ def encode_surface(surf):
             "data": base64.b64encode(q.tobytes()).decode("ascii")}
 
 
-def encode_mask(m):
+def encode_mask(m, step=2):
+    """Half-resolution, OR-reduced. Eight of these at full 5 cm cost
+    528 kB of the payload for an overlay the eye reads as broad regions;
+    at 10 cm they are a quarter of that and look identical."""
     import base64
-    return base64.b64encode(np.packbits(m.astype(np.uint8).ravel())
+    a = m[::step, ::step].copy()
+    for i in range(step):
+        for j in range(step):
+            a |= m[i::step, j::step][:a.shape[0], :a.shape[1]]
+    return base64.b64encode(np.packbits(a.astype(np.uint8).ravel())
                             ).decode("ascii")
 
 
