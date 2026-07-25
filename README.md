@@ -107,20 +107,26 @@ That is the standard navmesh pipeline — the same heightfield Recast/Detour bui
 from a Unity scene and habitat-sim builds from a scanned mesh. Point it at a real
 captured building instead of a generated one and nothing downstream changes.
 
-**Layer 1 — geometric.** Every ADA rule at every cell for every profile: clear
-width along the circulation medial axis, running slope, level change, head
-clearance, and turning space per room.
+Two detectors run, and they are complementary rather than redundant.
 
-**Layer 2 — behavioural.** Hesitation-weighted telemetry. Where a goal is
-unreachable an agent routes as close as it can, dwells, and backtracks, producing
-a hesitation hotspot on the feature that excluded it.
+**Geometric sweep.** Every ADA rule at every cell for every profile: clear width
+along the circulation medial axis, running slope, level change, head clearance,
+floor finish, turning space per room, and counter height against the model. It
+catches what violates, including defects that block nobody's route.
 
-**Layer 3 — embodied.** Where a constrained profile's reachable set fails to cover
-ground the baseline reaches, that is an exclusion. *The erosion is the check.*
+**Embodied reachability.** Where a constrained profile's reachable set fails to
+cover ground the baseline reaches, that is an exclusion. *The erosion is the
+check.* It catches what excludes, and localises the barrier responsible — but it
+reports only the cheapest barrier per route, so a second defect behind the first
+is masked.
 
-A finding confirmed by more than one layer is high-confidence. Disagreement is
-reported, not hidden — an embodied exclusion with no geometric violation is the
-interesting case.
+A planted defect counts as detected if either recovers it. Neither is ever told
+where to look.
+
+> A third layer — hesitation-weighted behavioural telemetry — exists in
+> `legacy/telemetry.py` with the consensus auditor that combines all three. It is
+> **not** on the path the shipped walkthrough runs, and the numbers above do not
+> depend on it.
 
 ### Barrier localisation
 
@@ -200,14 +206,12 @@ recall figure possible and is the one thing no dataset-based approach can offer.
 
 ```
 core/
-  schema.py      profiles + result contract (single source of truth)
+  schema.py      profiles, floor surfaces, result contract
   world3d.py     3D building, and its voxelisation
   navgrid.py     navmesh pipeline: erode, mask, label
   pathing.py     geodesic routing; least-resistance barrier routing
   sweep.py       blind geometric sweep of every rule, everywhere
   analysis.py    breaking point, barriers, population, remediation
-  telemetry.py   Layer 2 behavioural signal
-  auditor.py     three-layer consensus audit
 viz/
   scene3d.py     exports out/scene.json
   detail3d.js    procedural surfaces, furnishing, figures
@@ -215,7 +219,8 @@ viz/
   build3d.py     bundles everything into one self-contained file
 ```
 
-`out/` is generated and gitignored.
+`out/` is generated and gitignored. `legacy/` holds the earlier 2.5D build and
+its three-layer auditor; nothing in the shipped pipeline imports it.
 
 ---
 
