@@ -21,6 +21,7 @@ import numpy as np
 from scipy import ndimage
 
 from schema import (ALL_PROFILES, BASELINE, WHEELCHAIR, MobilityAgentProfile,
+                    profile_label as _who,
                     IN_PER_M)
 from navgrid import NavGrid
 from pathing import GeoField, PenaltyField
@@ -554,9 +555,9 @@ def budget_frontier(free, height, cell, spawn, goals, budgets, seed=7,
             if not before:
                 continue
             if aft["goals"] < before["goals"]:
-                harmed = f"{nm} loses a destination"
+                harmed = f"{_who(nm)} loses a destination"
             elif aft["pct"] < before["pct"] - 0.25:
-                harmed = f"{nm} loses floor"
+                harmed = f"{_who(nm)} loses floor"
         if harmed:
             rejected.append({"id": fx["id"], "detail": fx["detail"],
                              "cost": int(round(fx["cost"])), "why": harmed})
@@ -792,7 +793,7 @@ def optimise(free, height, cell, spawn, goals, budget: float = 5000.0,
             for name, before in a.items():
                 after = b.get(name, before)
                 lost = before["goals"] - after["goals"]
-                who = name.replace("_", " ")
+                who = _who(name)
                 if lost > 0:
                     return (f"the {who} loses a destination it has today"
                             if lost == 1 else

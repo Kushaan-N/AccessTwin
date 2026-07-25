@@ -1126,8 +1126,8 @@ function openWorkOrder(it) {
   const rows = [
     ["Location", `${it.room || "—"} · ${fmtPos(it)}`],
     ["Constraint", it.clause || it.kind.replace(/_/g, " ")],
-    ["Finding", it.detail],
-    ["Recommended", VLABEL[it.verdict] || it.verdict],
+    ["Scope of work", it.detail],
+    ["Work type", VLABEL[it.verdict] || it.verdict],
     ["Estimated cost", it.cost ? "$" + it.cost.toLocaleString() : "no cost"],
     ["Floor returned", (it.recovered_m2 || 0) + " m²"],
     ["Value", it.cost_per_m2 ? "$" + it.cost_per_m2 + " per m²" : "—"],
@@ -1149,8 +1149,8 @@ function workOrderText(it) {
     ISSUES.findIndex(q => q.id === it.id) + 1}`,
     `Location:    ${it.room || "-"} (${fmtPos(it)})`,
     `Constraint:  ${it.clause || it.kind}`,
-    `Finding:     ${it.detail}`,
-    `Action:      ${VLABEL[it.verdict] || it.verdict}`,
+    `Scope:       ${it.detail}`,
+    `Work type:   ${VLABEL[it.verdict] || it.verdict}`,
     `Cost:        ${it.cost ? "$" + it.cost.toLocaleString() : "no cost"}`,
     `Returns:     ${it.recovered_m2 || 0} m²`,
     `Excludes:    ${(it.excludes || []).map(n => (P[n] && P[n].label) || n)
@@ -2251,9 +2251,22 @@ el("iscopy").addEventListener("click", async () => {
     await navigator.clipboard.writeText(csv);
     el("iscopy").textContent = "Copied";
   } catch (err) {
-    el("iscopy").textContent = "Press ⌘C";
+    // navigator.clipboard rejects whenever the document is not focused,
+    // which happens often enough to matter. The old fallback appended a
+    // bare textarea to the body and left it there: a visible 37px box
+    // that pushed the playback controls below the fold and never went
+    // away. Keep it off screen, try the legacy copy, always take it out.
     const ta = document.createElement("textarea");
-    ta.value = csv; document.body.appendChild(ta); ta.select();
+    ta.value = csv;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText =
+      "position:fixed;top:0;left:-9999px;width:1px;height:1px;opacity:0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    el("iscopy").textContent = ok ? "Copied" : "Press ⌘C";
+    setTimeout(() => ta.remove(), 1800);
   }
   setTimeout(() => { el("iscopy").textContent = "Copy"; }, 1800);
 });

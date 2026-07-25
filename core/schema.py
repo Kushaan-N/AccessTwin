@@ -82,6 +82,23 @@ DELIVERY_ROBOT = MobilityAgentProfile(
 
 ALL_PROFILES = [BASELINE, WHEELCHAIR, CANE_SWEEP, DELIVERY_ROBOT]
 
+
+# Display names. These were defined in the viz layer, which meant the
+# analysis had no way to name a profile in a message and emitted raw dict
+# keys instead -- the budget panel shipped "vision_impaired_cane loses a
+# destination" to the page. One map, imported by both sides.
+PROFILE_LABELS = {
+    "baseline_walking": "Walking adult",
+    "wheelchair": "Wheelchair user",
+    "vision_impaired_cane": "Cane user",
+    "sidewalk_delivery_robot": "Delivery robot",
+}
+
+
+def profile_label(name: str) -> str:
+    return PROFILE_LABELS.get(name, name.replace("_", " "))
+
+
 ADA_CITATIONS = {
     ViolationType.CLEARANCE: "ADA 2010 §404.2.3 / §403.5.1 — clear width",
     ViolationType.SLOPE: "ADA 2010 §405.2 — ramp running slope max 1:12",

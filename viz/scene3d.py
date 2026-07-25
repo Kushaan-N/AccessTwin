@@ -40,12 +40,7 @@ COLORS = {
     "vision_impaired_cane":    {"dark": "#D05C8C", "light": "#B03368"},
     "sidewalk_delivery_robot": {"dark": "#BE8A30", "light": "#8A6410"},
 }
-LABELS = {
-    "baseline_walking": "Walking adult",
-    "wheelchair": "Wheelchair user",
-    "vision_impaired_cane": "Cane user",
-    "sidewalk_delivery_robot": "Delivery robot",
-}
+from schema import PROFILE_LABELS as LABELS   # single source, see schema.py
 BODY = {
     "baseline_walking": "walker",
     "wheelchair": "wheelchair",
