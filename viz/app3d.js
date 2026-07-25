@@ -655,6 +655,136 @@ function addMarker(x, y, z, text, sub, color, kind) {
   return grp;
 }
 
+/* ---------- clickable chokepoints ---------- */
+/* Every blockage the analysis found, with a verdict attached: move it,
+   re-lay it, build it, or -- the case a two-way split cannot express --
+   fix it together with others or not at all. */
+const CP = D.chokepoints || [];
+const cpGroup = new THREE.Group();
+scene.add(cpGroup);
+const cpHits = [];
+
+const VERDICT_COLOR = () => ({
+  move: TOK.ok, reconfigure: TOK.warn, build: TOK.bad, combined: TOK.bad
+});
+
+function buildChokepoints() {
+  while (cpGroup.children.length) cpGroup.children.pop();
+  cpHits.length = 0;
+  const col = VERDICT_COLOR();
+  CP.forEach((c, i) => {
+    const g = new THREE.Group();
+    g.position.copy(v3(c.pos[0], c.pos[1], 0));
+    const cc = new THREE.Color(col[c.verdict] || TOK.bad);
+
+    const disc = new THREE.Mesh(
+      new THREE.RingGeometry(0.34, 0.5, 30),
+      new THREE.MeshBasicMaterial({ color: cc, transparent: true,
+                                    opacity: 0.92, side: THREE.DoubleSide,
+                                    depthWrite: false, depthTest: false }));
+    disc.rotation.x = -Math.PI / 2; disc.position.y = 0.05;
+    disc.renderOrder = 20; g.add(disc);
+
+    const post = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.045, 0.045, 1.7, 8),
+      new THREE.MeshBasicMaterial({ color: cc, transparent: true,
+                                    opacity: 0.55, depthWrite: false,
+                                    depthTest: false }));
+    post.position.y = 0.85; post.renderOrder = 20; g.add(post);
+
+    const knob = new THREE.Mesh(
+      new THREE.SphereGeometry(0.17, 18, 12),
+      new THREE.MeshBasicMaterial({ color: cc, depthTest: false }));
+    knob.position.y = 1.78; knob.renderOrder = 21; g.add(knob);
+
+    // Generous invisible hit target: the visible knob is only a few
+    // pixels across at demo distance and would be unclickable.
+    const hit = new THREE.Mesh(
+      new THREE.SphereGeometry(0.85, 10, 8),
+      new THREE.MeshBasicMaterial({ visible: false }));
+    hit.position.y = 1.4;
+    hit.userData.cp = c;
+    g.add(hit); cpHits.push(hit);
+
+    g.userData.knob = knob;
+    cpGroup.add(g);
+  });
+  cpGroup.visible = false;
+}
+buildChokepoints();
+
+function cpSummary() {
+  const free = CP.filter(c => c.cost === 0);
+  const paid = CP.filter(c => c.cost > 0);
+  const total = paid.reduce((a, c) => a + c.cost, 0);
+  el("cpsum").innerHTML =
+    `<b>${free.length} <i>free \u2014 move the furniture</i></b>` +
+    `<b>${paid.length} <i>need building \u2014</i> $${total.toLocaleString()}</b>` +
+    `<b><i>click any marker</i></b>`;
+}
+
+const ray = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+let cpOpen = null;
+
+function showChokepoint(c) {
+  cpOpen = c;
+  const pop = el("cppop");
+  pop.hidden = false;
+  el("cpverdict").className = "cpv " + c.verdict;
+  el("cpverdict").textContent =
+    c.verdict === "move" ? "move it \u2014 free"
+      : c.verdict === "reconfigure" ? "re-lay fixed furniture"
+      : c.verdict === "build" ? "reconstruction"
+      : "combined works needed";
+  el("cptitle").textContent =
+    c.verdict === "move" ? "Blocked by loose furniture"
+      : c.verdict === "reconfigure" ? "Blocked by fixed furniture"
+      : c.verdict === "combined" ? "One of several barriers"
+      : "Blocked by the building";
+  el("cpdetail").textContent = c.detail;
+
+  const rows = [];
+  rows.push(["Cost", c.cost === 0 ? "no cost" : "$" + c.cost.toLocaleString()]);
+  if (c.excludes && c.excludes.length) {
+    rows.push(["Excludes", c.excludes.map(n =>
+      (P[n] && P[n].label) || n).join(", ")]);
+  }
+  if (c.area_m2) rows.push(["Returns", c.area_m2 + " m\u00b2 of floor"]);
+  if (c.opens_alone && c.opens_alone.length) {
+    rows.push(["Opens", c.opens_alone.map(n =>
+      (P[n] && P[n].label) || n).join(", ")]);
+  } else if (c.verdict === "combined") {
+    rows.push(["On its own", "opens nothing"]);
+  }
+  if (c.chosen) rows.push(["Optimiser", "selected within budget"]);
+  el("cpfacts").innerHTML = rows.map(([k, v]) =>
+    `<dt>${k}</dt><dd>${v}</dd>`).join("");
+
+  // Anchor the panel to the marker's projected position, clamped inside
+  // the viewport so a marker near an edge does not push it off-screen.
+  const p = v3(c.pos[0], c.pos[1], 1.9).project(camera);
+  const r = stage.getBoundingClientRect();
+  const x = (p.x * 0.5 + 0.5) * r.width;
+  const y = (-p.y * 0.5 + 0.5) * r.height;
+  pop.style.left = Math.max(8, Math.min(r.width - 300, x + 16)) + "px";
+  pop.style.top = Math.max(8, Math.min(r.height - 210, y - 40)) + "px";
+  pop.focus();
+}
+
+function hideChokepoint() { cpOpen = null; el("cppop").hidden = true; }
+
+stage.addEventListener("click", e => {
+  if (!cpGroup.visible) return;
+  const r = stage.getBoundingClientRect();
+  ndc.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+  ndc.y = -((e.clientY - r.top) / r.height) * 2 + 1;
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObjects(cpHits, false)[0];
+  if (hit) showChokepoint(hit.object.userData.cp);
+  else hideChokepoint();
+});
+
 /* ---------- camera ---------- */
 let camState = { pos: new THREE.Vector3(), tgt: new THREE.Vector3() };
 let camGoal = { pos: new THREE.Vector3(), tgt: new THREE.Vector3() };
@@ -926,6 +1056,72 @@ const SCENES = [
     }
   },
   {
+    id: "contents", dur: 10.0, kicker: "The building, or what is in it",
+    cap: () => {
+      const c = D.counterfactual;
+      if (!c) return "";
+      const wc = c.profiles.wheelchair, cn = c.profiles.vision_impaired_cane;
+      return `Regenerate the same building with its contents taken out —
+        same walls, same ramp, same doors. The wheelchair goes from
+        <em>${wc.as_built_pct}% to ${wc.contents_removed_pct}%</em> and the
+        cane user from <em>${cn.as_built_pct}% to
+        ${cn.contents_removed_pct}%</em>. <em>That is ${c.furniture_m2} m² of
+        furniture deciding who can use the building</em>, and none of the
+        rooms that stay shut are shut by it.`;
+    },
+    stat: () => {
+      const c = D.counterfactual;
+      return c ? ["+" + n0(c.profiles.vision_impaired_cane.recovered_pct, 1) +
+                  " pts", "recoverable without touching the building"]
+                : ["—", ""];
+    },
+    enter() {
+      hideAgents(); clearMarkers(); hideChokepoint();
+      decalGroup.visible = true; paintDecal("profile", P.wheelchair, false);
+      cpGroup.visible = false; setWallCut(0.16);
+      lookAt(BW / 2, -5, 33, BW / 2, BH / 2, 0);
+    },
+    tick(t) {
+      lookAt(BW / 2 + Math.sin(t * 0.25) * 7, -5, 33, BW / 2, BH / 2, 0);
+    }
+  },
+  {
+    id: "choke", dur: 22.0, kicker: "Every blockage, priced",
+    cap: `<em>Click any marker.</em> Each blockage carries a verdict: move
+          the furniture and it costs nothing; re-lay fixed seating or widen
+          an opening and it costs money; or — the case a two-way split
+          cannot express — <em>fixing it alone opens nothing</em>, because it
+          is one of several barriers on the same route.`,
+    stat: () => {
+      const free = CP.filter(c => c.cost === 0).length;
+      const paid = CP.filter(c => c.cost > 0);
+      return [String(free) + " free",
+              "and " + paid.length + " needing $" +
+              paid.reduce((a, c) => a + c.cost, 0).toLocaleString()];
+    },
+    enter() {
+      hideAgents(); clearMarkers(); decalGroup.visible = false;
+      buildChokepoints();
+      cpGroup.visible = true; setWallCut(0.16);
+      el("cpsum").hidden = false; cpSummary();
+      lookAt(BW / 2, -6, 32, BW / 2, BH / 2, 0);
+    },
+    tick(t) {
+      // Markers rise in sequence so the eye finds them, then the camera
+      // drifts gently. Clicking is available throughout.
+      cpGroup.children.forEach((g, i) => {
+        const a = Math.max(0, Math.min(1, (t - 0.25 - i * 0.16) / 0.45));
+        g.scale.setScalar(a);
+        g.visible = a > 0.01;
+        if (g.userData.knob) {
+          g.userData.knob.position.y = 1.78 + Math.sin(clock * 2.2 + i) * 0.06;
+        }
+      });
+      lookAt(BW / 2 + Math.sin(t * 0.18) * 9, -6 + Math.sin(t * 0.11) * 2,
+             32, BW / 2, BH / 2, 0);
+    }
+  },
+  {
     id: "fix", dur: 12.0, kicker: "Cheapest repair",
     cap: chosen ? `Every candidate repair is scored by <em>rebuilding the
           building and re-running the whole population through it</em>. With
@@ -1085,6 +1281,11 @@ function applyScene(i) {
   userCam = false;
   sliderTouched = false;
   roomLabels.visible = true;
+  if (s.id !== "choke") {
+    cpGroup.visible = false;
+    el("cpsum").hidden = true;
+    hideChokepoint();
+  }
   if (!s.slider) {
     el("widthcard").hidden = true;
     roomGroup.visible = false;
@@ -1165,6 +1366,7 @@ el("play").addEventListener("click", () => {
   el("play").textContent = playing ? "Pause" : "Play";
 });
 el("restart").addEventListener("click", () => goto(0));
+el("cpclose").addEventListener("click", hideChokepoint);
 el("widthslider").addEventListener("input", e => {
   sliderTouched = true;
   applyWidth(Number(e.target.value));
@@ -1176,6 +1378,7 @@ addEventListener("keydown", e => {
   if (e.key === "ArrowRight") { e.preventDefault(); goto(sceneI + 1); }
   if (e.key === "ArrowLeft") { e.preventDefault(); goto(sceneI - 1); }
   if (e.key.toLowerCase() === "p") { el("play").click(); }
+  if (e.key === "Escape") hideChokepoint();
 });
 addEventListener("resize", resize);
 const mo = () => { tokens(); buildMaterials(); applyEnv();
@@ -1189,6 +1392,8 @@ new MutationObserver(mo).observe(document.documentElement,
    advances the walkthrough by an explicit timestep and forces a draw,
    which is also how the still frames for the write-up are produced. */
 window.__AT3 = Object.assign(window.__AT3 || {}, {
+  showCP: showChokepoint,
+  camera: camera,
   seek(index, seconds, dt) {
     goto(index);   // NB: not named `scene` -- that shadows the THREE.Scene
     const h = dt || 1 / 60;
