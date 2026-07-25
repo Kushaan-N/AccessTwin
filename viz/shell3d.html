@@ -116,6 +116,13 @@
 .chip.on{color:var(--ink);background:var(--panel);border-color:var(--rule)}
 
 .legend{display:flex;flex-direction:column;gap:5px}
+.wrow{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+.wrow input{flex:1;accent-color:var(--accent);cursor:pointer}
+.wrow b{font-family:var(--mono);font-size:14px;font-variant-numeric:tabular-nums;
+  min-width:44px;text-align:right}
+#roomstate span{justify-content:flex-start}
+#roomstate .off{color:var(--bad)}
+#roomstate .on{color:var(--ink-2)}
 .legend span{display:flex;align-items:center;gap:7px;font-size:11.5px;
   color:var(--ink-2)}
 .legend i{width:13px;height:9px;border-radius:2px;flex:none}
@@ -163,6 +170,15 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--panel);
       <div class="card stat">
         <span class="n" id="statn">—</span>
         <span class="l" id="statl">—</span>
+      </div>
+      <div class="card" id="widthcard" hidden>
+        <h3>Body width</h3>
+        <div class="wrow">
+          <input id="widthslider" type="range" min="0" max="15" value="0"
+                 step="1" aria-label="Body width in inches">
+          <b id="widthval">18&Prime;</b>
+        </div>
+        <div id="roomstate" class="legend"></div>
       </div>
       <div class="card">
         <h3>Exclusion map key</h3>
