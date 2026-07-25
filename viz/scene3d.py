@@ -221,6 +221,7 @@ def main():
         pr["after_goals"] = {g: bool(after.reaches(p, spawn, c))
                              for g, c in goals.items()}
 
+    sweepw = width_sweep(w, grid, spawn, cell)
     recall = score_recall(w, grid, profiles, free, cell)
 
     scene = w.to_scene()
@@ -235,6 +236,7 @@ def main():
         "detour": det,
         "remediation": opt,
         "recall": recall,
+        "width_sweep": sweepw,
     })
 
     os.makedirs(os.path.join(ROOT, "out"), exist_ok=True)
@@ -245,6 +247,47 @@ def main():
     print(f"population full access: {pop['pct_full_access']}% -> "
           f"{opt['after']['pct_full_access']}% after ${opt['spent_usd']:,}")
     print(f"recall: {recall['detected']}/{recall['planted']}")
+
+
+def width_sweep(w, grid, spawn, cell, lo=18.0, hi=48.0, step=2.0):
+    """Which rooms survive, as the body gets wider.
+
+    Sweeps a probe body across the population's width range holding a
+    real wheelchair's slope and step tolerance fixed, and records which
+    rooms it can still reach. Reporting rooms rather than a pixel mask
+    is both far smaller to ship and far more legible: on a projector you
+    watch named rooms switch off one at a time, and the width at which
+    each one goes dark is the number that matters.
+    """
+    from schema import WHEELCHAIR
+    base = grid.analyse(BASELINE, spawn)["reachable_m2"] or 1.0
+    rows = []
+    wi = lo
+    while wi <= hi + 1e-9:
+        p = A.probe(wi, WHEELCHAIR.max_slope_ratio, WHEELCHAIR.max_step_in)
+        st = grid.analyse(p, spawn, min_island_cells=10 ** 9)
+        reach = st["reachable"]
+        rooms = {}
+        for r in w.rooms:
+            i0, i1 = int(r["x0"] / cell), int(r["x1"] / cell)
+            j0, j1 = int(r["y0"] / cell), int(r["y1"] / cell)
+            sub = reach[i0:i1, j0:j1]
+            # Usable means a meaningful patch of the room is reachable,
+            # not that the body can put one wheel over the sill. The
+            # threshold scales with the room: a fixed 2 m2 would call a
+            # 3 m2 WC closed at every width and hide the transition that
+            # actually matters.
+            area = max((i1 - i0) * (j1 - j0) * cell ** 2, 1e-6)
+            got = float(sub.sum()) * cell ** 2
+            rooms[r["name"]] = bool(got >= max(0.7, 0.14 * area))
+        rows.append({
+            "width_in": round(wi, 1),
+            "reach_m2": st["reachable_m2"],
+            "pct": round(100 * st["reachable_m2"] / base, 1),
+            "rooms": rooms,
+        })
+        wi += step
+    return rows
 
 
 def nearest_room(w, x, y):
