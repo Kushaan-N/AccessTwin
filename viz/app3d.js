@@ -353,6 +353,11 @@ function setWallCut(f) {
   wallCut = f;
   SOLID_MESHES.forEach(m => {
     const s = m.userData.solid;
+    // Door headers sit at 2.1-2.9 m. Cutting the walls to knee height
+    // left them hanging in mid-air with nothing beneath them -- eleven
+    // grey slabs floating over the plan. Soffits stay: the bulkhead and
+    // the hung screen ARE findings, and a body walks into them.
+    if (s.kind === "door_header") { m.visible = f > 0.55; return; }
     if (s.kind !== "wall" || s.tag === "column") return;
     const h = s.z1 - s.z0;
     const keep = Math.max(0.06, f);
@@ -934,8 +939,29 @@ function addMarker(x, y, z, text, sub, color, kind) {
     new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.9,
                                   side: THREE.DoubleSide, depthWrite: false }));
   disc.rotation.x = -Math.PI / 2; disc.position.y = 0.03; grp.add(disc);
+  // Two findings a few centimetres apart -- a bulkhead and the turning
+  // circle under it, or thirteen planted defects in one shot -- put
+  // their labels at identical height and render one illegibly on top of
+  // the other. Stack them instead, one step per neighbour already
+  // claiming this patch of floor.
+  let tier = 0;
+  markers.children.forEach(m => {
+    if (Math.hypot(m.position.x - grp.position.x,
+                   m.position.z - grp.position.z) < 2.2) tier++;
+  });
   const lab = makeLabel(text, color, sub);
-  lab.position.y = 2.75; grp.add(lab);
+  lab.position.y = 2.75 + tier * 0.78;
+  grp.add(lab);
+  if (tier) {
+    // A leader so a raised label still reads as belonging to its marker.
+    const lead = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.012, 0.012, tier * 0.78, 6),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(color),
+        transparent: true, opacity: 0.45, depthTest: false }));
+    lead.position.y = 2.5 + tier * 0.39;
+    lead.renderOrder = 30;
+    grp.add(lead);
+  }
   grp.userData.pulse = disc;
   grp.userData.born = clock;
   markers.add(grp);
