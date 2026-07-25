@@ -1540,6 +1540,10 @@ function resetRemedy() {
 function triggerRemedy() {
   if (remedied) return;
   remedied = true;
+  // The callout said the opening is 28 inches. It is 46 now, so leaving
+  // it up states something false about the building on screen -- and at
+  // the range the follow camera ends up at, the sprite fills the frame.
+  clearMarkers();
   const fx = (OPT.chosen || [])[0];
   el("remedystate").textContent = fx
     ? `${fx.detail} · $${fx.cost.toLocaleString()}` : "";
@@ -1565,7 +1569,7 @@ function journeyOf(pname, goal) { return P[pname].journeys[goal]; }
 
 const SCENES = [
   {
-    id: "establish", dur: 7.0, kicker: "The building",
+    id: "establish", dur: 5.0, kicker: "The building",
     cap: () => {
       // Built from the data. Hard-coding the room list and the defect
       // count meant the opening line still said "eight defects" and
@@ -1591,14 +1595,14 @@ const SCENES = [
     }
   },
   {
-    id: "walker", dur: 15.0, kicker: "Walking adult", profile: "baseline_walking",
+    id: "walker", dur: 12.0, kicker: "Walking adult", profile: "baseline_walking",
     cap: `A walking adult reaches <em>every room in the building</em> —
           ${n0(P.baseline_walking.reach_m2, 0)} m², 100% of the floor.
           The community room, the gallery, the WC: all connected.
           This is the building as its drawings describe it.`,
     stat: () => ["100%", "of the floor reached"],
     walk: [["baseline_walking", "community_room", 0],
-           ["baseline_walking", "gallery", 5.0]],
+           ["baseline_walking", "gallery", 3.5]],
     enter() { hideAgents(); decalGroup.visible = false; },
     tick(t) {
       // Walls drop to knee height over the first two seconds, which the
@@ -1608,7 +1612,7 @@ const SCENES = [
     }
   },
   {
-    id: "chair-room", dur: 15.0, kicker: "Wheelchair · community room",
+    id: "chair-room", dur: 12.0, kicker: "Wheelchair · community room",
     profile: "wheelchair",
     cap: () => {
       const b = (journeyOf("wheelchair", "community_room").barriers || [])[0];
@@ -1622,7 +1626,7 @@ const SCENES = [
     stat: () => [n0(P.wheelchair.pct, 1) + "%", "of the floor reached"],
     walk: [["wheelchair", "community_room", 0]],
     enter() { hideAgents(); decalGroup.visible = false; setWallCut(0.22); },
-    tick(t) { followOrPOV("wheelchair", t, 9, -5, 6); },
+    tick(t) { followStopped("wheelchair", t, 9, -5, 6, "community_room"); },
     onStop(pname, goal) {
       const j = journeyOf(pname, goal);
       (j.barriers || []).slice(0, 2).forEach((b, i) => {
@@ -1637,32 +1641,7 @@ const SCENES = [
     }
   },
   {
-    id: "eye", dur: 13.0, kicker: "At eye level", profile: "wheelchair",
-    cap: `The same approach, from the chair. <em>Nothing about this view is
-          unusual until it stops.</em> That is the point: the failure is not
-          visible from the corridor, it is not visible on the drawing, and it
-          is not visible to anybody who does not have to make the turn.`,
-    stat: () => ["28\u2033", "clear, where 32 are required"],
-    walk: [["wheelchair", "community_room", 0]],
-    enter() {
-      hideAgents(); clearMarkers(); decalGroup.visible = false;
-      roomGroup.visible = false;
-      // Full-height walls and no floating room labels: from inside, the
-      // doll's-house section and the plan annotation both break the
-      // illusion that you are actually in the room.
-      setWallCut(1.0);
-      roomLabels.visible = false;
-    },
-    tick(t) { eyeLevel("wheelchair", 2.5); },
-    onStop(pname, goal) {
-      (journeyOf(pname, goal).barriers || []).slice(0, 1).forEach(b =>
-        addMarker(b.pos[0], b.pos[1], b.pos[2],
-                  `${n0(b.aperture_in)}\u2033 clear`,
-                  "needs 32\u2033 — ADA 404.2.3", TOK.bad));
-    }
-  },
-  {
-    id: "width", dur: 18.0, kicker: "Where does it close?",
+    id: "width", dur: 13.0, kicker: "Where does it close?",
     cap: `Drag the slider. Every room is re-tested as the body widens, and
           they switch off one at a time. <em>At 28 inches the community room
           and the accessible WC go dark; at 32 — a standard powered
@@ -1692,11 +1671,11 @@ const SCENES = [
     }
   },
   {
-    id: "remediate", dur: 26.0, kicker: "Fix it, and walk it again",
+    id: "remediate", dur: 22.0, kicker: "Fix it, and walk it again",
     profile: "wheelchair", remediable: true,
     // Each leg gets about a third of the scene: walk up, a beat at the
     // door for somebody to press the button, then walk through.
-    pace: 0.30,
+    pace: 0.26,
     cap: () => {
       const fx = (OPT.chosen || [])[0];
       const wc = P.wheelchair;
@@ -1754,7 +1733,7 @@ const SCENES = [
     }
   },
   {
-    id: "islands", dur: 12.0, kicker: "The finding",
+    id: "islands", dur: 9.0, kicker: "The finding",
     cap: `Those two regions are <em>geometrically flawless inside</em> — wide,
           dead flat, with turning circles to spare. They are also completely
           unreachable in a wheelchair. <em>No clearance-based audit flags a room
@@ -1775,7 +1754,7 @@ const SCENES = [
     }
   },
   {
-    id: "cane", dur: 10.0, kicker: "Cane user · WC", profile: "vision_impaired_cane",
+    id: "cane", dur: 9.0, kicker: "Cane user · WC", profile: "vision_impaired_cane",
     cap: `A cane sweeps a 42-inch arc — <em>wider than a wheelchair</em>. It
           clears the corridor, then meets a bulkhead dropped to 1 950 mm over
           the accessible WC door. <em>The WC excludes two different people for
@@ -1784,7 +1763,7 @@ const SCENES = [
     stat: () => ["1 950 mm", "headroom, needs 2 032"],
     walk: [["vision_impaired_cane", "restroom", 0]],
     enter() { hideAgents(); clearMarkers(); decalGroup.visible = false; setWallCut(0.22); },
-    tick(t) { followOrPOV("vision_impaired_cane", t, 7, -4, 4.5); },
+    tick(t) { followStopped("vision_impaired_cane", t, 7, -4, 4.5, "restroom"); },
     onStop(pname, goal) {
       (journeyOf(pname, goal).barriers || []).slice(0, 1).forEach(b => {
         addMarker(b.pos[0], b.pos[1], b.pos[2], `1 950 mm`,
@@ -1796,7 +1775,7 @@ const SCENES = [
     }
   },
   {
-    id: "robot", dur: 9.0, kicker: "Delivery robot",
+    id: "robot", dur: 7.0, kicker: "Delivery robot",
     profile: "sidewalk_delivery_robot",
     cap: `A 26-inch delivery robot goes <em>straight through the door that
           excluded the wheelchair</em>. It is narrow enough. The same building
@@ -1809,7 +1788,7 @@ const SCENES = [
     tick(t) { follow("sidewalk_delivery_robot", t, 9, -5, 6); }
   },
   {
-    id: "materials", dur: 13.0, kicker: "What the floor is made of",
+    id: "materials", dur: 10.0, kicker: "What the floor is made of",
     cap: `Geometry is not the only rule. <em>ADA 302 governs the floor
           itself</em>, and pile over 13 mm fails it. The auditorium is
           carpeted at 22 mm: level, wide, generous, compliant on every
@@ -1835,7 +1814,7 @@ const SCENES = [
     }
   },
   {
-    id: "choke", dur: 20.0, kicker: "Every blockage, priced",
+    id: "choke", dur: 14.0, kicker: "Every blockage, priced",
     cap: `<em>Click any marker.</em> Each blockage carries a verdict: move
           the furniture and it costs nothing; re-lay fixed seating or widen
           an opening and it costs money; or — the case a two-way split
@@ -1871,41 +1850,7 @@ const SCENES = [
     }
   },
   {
-    id: "fix", dur: 12.0, kicker: "Cheapest repair",
-    cap: chosen ? `Every candidate repair is scored by <em>rebuilding the
-          building and re-running the whole population through it</em>. With
-          $${OPT.budget_usd.toLocaleString()} the optimum is
-          <em>$${chosen.cost.toLocaleString()}</em> — ${chosen.detail} —
-          returning the community room to the wheelchair
-          (<em>${P.wheelchair.pct}% → ${P.wheelchair.after_pct}%</em> of the
-          floor) and the cane user
-          (${P.vision_impaired_cane.pct}% → ${P.vision_impaired_cane.after_pct}%).`
-          + (rejected ? ` A cheaper repair scored
-          <em>${n0(rejected.pct_per_1k_usd, 1)} points per $1k against
-          ${n0(chosen.pct_per_1k_usd, 1)}</em> and was still rejected:
-          rebuilt that way, ${rejected.harm}.` : "")
-      : "No single repair improved measured population coverage.",
-    stat: () => chosen
-      ? ["+" + n0(P.wheelchair.after_pct - P.wheelchair.pct, 1) + " pts",
-         "floor returned to the wheelchair, for $" + OPT.spent_usd.toLocaleString()]
-      : ["—", ""],
-    enter() {
-      hideAgents(); clearMarkers();
-      decalGroup.visible = true; paintDecal("heat", null, false);
-      OPT.chosen.forEach(f => addMarker(f.pos[0], f.pos[1], 0,
-        "$" + f.cost.toLocaleString(), f.detail, TOK.ok));
-      (OPT.rejected || []).filter(f => f.harm).slice(0, 2).forEach(f =>
-        addMarker(f.pos[0], f.pos[1], 0, "$" + f.cost.toLocaleString(),
-                  "rejected — " + f.harm, TOK.bad));
-      lookAt(BW / 2, -8, 30, BW / 2, BH / 2, 0);
-    },
-    tick(t) {
-      // Halfway through, apply the fixes and show the floor change.
-      paintDecal("heat", null, t > this.dur * 0.55);
-    }
-  },
-  {
-    id: "truth", dur: 9.0, kicker: "Scored against truth",
+    id: "truth", dur: 7.0, kicker: "Scored against truth",
     cap: `Because the building is generated, an answer key exists.
           <em>${REC.planted} defects planted, ${REC.detected} recovered</em> by
           an analysis that was never told where to look — it found them by
@@ -1945,21 +1890,49 @@ function eyeLevel(pname, back) {
          s.p[0] + dx * 9, s.p[1] + dy * 9, s.p[2] + eye * 0.80);
 }
 
-/* When a body is stopped, drop to its own eye height for a beat before
-   pulling back. A 1:12 failure seen from above is a diagram; seen from
-   the seat it is a wall. The height is the profile's, not a constant. */
-const POV_HOLD = 2.6;
-function followOrPOV(pname, t, back, side, up) {
-  const p = P[pname], st = p._active;
-  if (st && st.done && !st.j.arrived) {
-    if (st.stoppedAt == null) st.stoppedAt = t;
-    const since = t - st.stoppedAt;
-    if (since < POV_HOLD) { eyeLevel(pname, 1.9); return; }
-  }
-  follow(pname, t, back, side, up);
+/* When a body is stopped, hold its own eye height for a moment -- a
+   1:12 failure seen from above is a diagram, seen from the seat it is a
+   wall -- and then pull back to a shot that actually contains the thing
+   that stopped it.
+
+   The eye-level shot alone was the bug: it sits 1.9 m behind a seated
+   rider looking level, so the callout hovering 2.75 m over the barrier
+   is above the top of frame and the viewer is told a door is too narrow
+   while looking at blank wall. The second shot is composed around the
+   barrier: back along the approach, offset to one side so the opening
+   reads as an opening, and high enough to keep the label in view. */
+const POV_HOLD = 1.3;
+
+function barrierOf(pname, goal) {
+  const j = P[pname].journeys[goal];
+  return j && j.barriers && j.barriers[0];
 }
 
-/* Follow the agent that is currently walking, from behind and above. */
+function followStopped(pname, t, back, side, up, goal) {
+  const p = P[pname], st = p._active;
+  if (!st || !st.sample) return;
+  if (!(st.done && !st.j.arrived)) {
+    follow(pname, t, back, side, up);
+    return;
+  }
+  if (st.stoppedAt == null) st.stoppedAt = t;
+  const since = t - st.stoppedAt;
+  if (since < POV_HOLD) { eyeLevel(pname, 1.9); return; }
+
+  const b = barrierOf(pname, goal || st.goal);
+  const s = st.sample;
+  if (!b) { follow(pname, t, back, side, up); return; }
+  // Midpoint of body and barrier, framed from the side.
+  const mx = (s.p[0] + b.pos[0]) / 2, my = (s.p[1] + b.pos[1]) / 2;
+  const dx = s.dir[0], dy = s.dir[1];
+  const ease = Math.min(1, (since - POV_HOLD) / 1.1);
+  lookAt(mx - dx * (5.6 * ease + 1.2) + dy * 4.2 * ease,
+         my - dy * (5.6 * ease + 1.2) - dx * 4.2 * ease,
+         1.7 + 2.4 * ease,
+         mx, my, 1.5);
+}
+
+/* Follow the agent that is currently walking, from behind and above. *//* Follow the agent that is currently walking, from behind and above. */
 function follow(pname, t, back, side, up) {
   back *= 0.62; side *= 0.62; up *= 0.72;
   const p = P[pname];
@@ -2248,10 +2221,7 @@ function syncNav() {
       `/${SCENES.length}`;
   }
 }
-el("remedybtn").addEventListener("click", () => {
-  triggerRemedy();
-  clearMarkers();
-});
+el("remedybtn").addEventListener("click", triggerRemedy);
 el("navnext").addEventListener("click", () => step(1));
 el("navprev").addEventListener("click", () => step(-1));
 el("budgetin").addEventListener("input", e =>
