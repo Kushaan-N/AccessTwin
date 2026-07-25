@@ -1,0 +1,188 @@
+<style>
+/* ============================================================
+   Access-Twin — 3D walkthrough chrome.
+   The viewport is the work; the chrome is a drawing title block
+   wrapped around it. Annotation voice is monospace throughout.
+   ============================================================ */
+:root {
+  color-scheme: light dark;
+
+  --ground:#EDF1F3; --sheet:#FFFFFF; --panel:#E3E9EC;
+  --rule:#C3CFD5; --rule-soft:#D6DFE3;
+  --ink:#10181D; --ink-2:#48606D; --ink-3:#6E858F;
+  --accent:#00897B; --ok:#0F7B63; --warn:#8A6410; --bad:#A32F44;
+
+  --stage-bg:#DCE4E8; --stage-fog:#DCE4E8;
+  --m-floor:#E8EAEA; --m-wall:#F3F5F6; --m-glass:#BBD5DE;
+  --m-ramp:#D8C69A; --m-concrete:#C2C7C9; --m-timber:#C8A97E;
+  --m-fabric:#9FB0BC; --m-porcelain:#FAFBFC; --m-steel:#9AA6AE;
+  --m-soffit:#DDE2E5; --m-gallery:#D3D9DC; --m-parapet:#E6E9EA;
+
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground:#0E1216; --sheet:#131A20; --panel:#172029;
+    --rule:#2A3742; --rule-soft:#1F2A33;
+    --ink:#E4ECF1; --ink-2:#93A4B1; --ink-3:#6B7D8A;
+    --accent:#29A090; --ok:#29A090; --warn:#BE8A30; --bad:#D0475E;
+
+    --stage-bg:#080B0E; --stage-fog:#0C1116;
+    --m-floor:#5A656F; --m-wall:#78858F; --m-glass:#5E93A6;
+    --m-ramp:#8A7A55; --m-concrete:#6E7A84; --m-timber:#9A7746;
+    --m-fabric:#5A6B78; --m-porcelain:#D6DEE4; --m-steel:#98A5AE;
+    --m-soffit:#616D77; --m-gallery:#6B7681; --m-parapet:#7E8B95;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0E1216;--sheet:#131A20;--panel:#172029;--rule:#2A3742;--rule-soft:#1F2A33;
+  --ink:#E4ECF1;--ink-2:#93A4B1;--ink-3:#6B7D8A;
+  --accent:#29A090;--ok:#29A090;--warn:#BE8A30;--bad:#D0475E;
+  --stage-bg:#080B0E;--stage-fog:#0C1116;
+  --m-floor:#5A656F;--m-wall:#78858F;--m-glass:#5E93A6;--m-ramp:#8A7A55;
+  --m-concrete:#6E7A84;--m-timber:#9A7746;--m-fabric:#5A6B78;
+  --m-porcelain:#D6DEE4;--m-steel:#98A5AE;--m-soffit:#616D77;
+  --m-gallery:#6B7681;--m-parapet:#7E8B95;
+}
+:root[data-theme="light"]{
+  --ground:#EDF1F3;--sheet:#FFFFFF;--panel:#E3E9EC;--rule:#C3CFD5;--rule-soft:#D6DFE3;
+  --ink:#10181D;--ink-2:#48606D;--ink-3:#6E858F;
+  --accent:#00897B;--ok:#0F7B63;--warn:#8A6410;--bad:#A32F44;
+  --stage-bg:#DCE4E8;--stage-fog:#DCE4E8;
+  --m-floor:#E8EAEA;--m-wall:#F3F5F6;--m-glass:#BBD5DE;--m-ramp:#C9CFD2;
+  --m-concrete:#C2C7C9;--m-timber:#C8A97E;--m-fabric:#9FB0BC;
+  --m-porcelain:#FAFBFC;--m-steel:#9AA6AE;--m-soffit:#DDE2E5;
+  --m-gallery:#D3D9DC;--m-parapet:#E6E9EA;
+}
+*{box-sizing:border-box}
+
+.at{
+  background:var(--ground); color:var(--ink); font-family:var(--sans);
+  min-height:100vh; display:flex; flex-direction:column;
+  padding:clamp(10px,1.6vw,20px); gap:11px; font-size:15px; line-height:1.5;
+}
+.head{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 18px;
+  border-bottom:1px solid var(--rule);padding-bottom:10px}
+.head h1{font-family:var(--mono);font-size:clamp(16px,2.1vw,21px);
+  font-weight:600;letter-spacing:-.02em;margin:0}
+.head h1 span{color:var(--accent)}
+.head p{margin:0;color:var(--ink-2);font-size:13px;max-width:60ch}
+#meta{margin-left:auto;font-family:var(--mono);font-size:10.5px;
+  color:var(--ink-3);letter-spacing:.05em;text-transform:uppercase;
+  white-space:nowrap}
+
+.body{display:grid;grid-template-columns:minmax(0,1fr) 268px;gap:11px;
+  align-items:stretch;flex:1;min-height:0}
+@media(max-width:920px){.body{grid-template-columns:minmax(0,1fr)}}
+
+.viewport{position:relative;background:var(--stage-bg);border:1px solid var(--rule);
+  border-radius:3px;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+#stage{flex:1;min-height:340px;cursor:grab;touch-action:none}
+#stage:active{cursor:grabbing}
+#stage canvas{display:block;width:100%;height:100%}
+
+.progress{height:2px;background:var(--rule-soft);flex:none}
+.progress i{display:block;height:100%;background:var(--accent);width:0}
+
+.block{border-top:1px solid var(--rule);background:var(--panel);
+  padding:10px 13px;display:flex;gap:13px;align-items:flex-start;min-height:86px;
+  flex:none}
+.block .no{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;
+  color:var(--ink-3);border-right:1px solid var(--rule);padding-right:13px;
+  white-space:nowrap;padding-top:2px}
+.block h2{font-family:var(--mono);font-size:11.5px;font-weight:600;
+  letter-spacing:.09em;text-transform:uppercase;margin:0 0 3px;color:var(--accent)}
+.block p{margin:0;font-size:14.5px;line-height:1.45;max-width:78ch;
+  text-wrap:balance}
+.block em{font-style:normal;font-weight:600;color:var(--ink)}
+
+.rail{display:flex;flex-direction:column;gap:9px;min-height:0}
+.card{background:var(--sheet);border:1px solid var(--rule);border-radius:3px;
+  padding:10px 11px}
+.card h3{font-family:var(--mono);font-size:10px;font-weight:600;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3);margin:0 0 8px}
+.stat .n{font-family:var(--mono);font-size:27px;font-weight:600;
+  letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.05;
+  display:block}
+.stat .l{font-size:12px;color:var(--ink-2)}
+#chips{display:flex;flex-direction:column;gap:6px}
+.chip{display:flex;align-items:center;gap:7px;font-size:12.5px;
+  color:var(--ink-3);padding:3px 6px;border-radius:3px;
+  border:1px solid transparent}
+.chip i{width:9px;height:9px;border-radius:2px;flex:none}
+.chip b{margin-left:auto;font-family:var(--mono);font-size:12px;
+  font-variant-numeric:tabular-nums;font-weight:600}
+.chip.on{color:var(--ink);background:var(--panel);border-color:var(--rule)}
+
+.legend{display:flex;flex-direction:column;gap:5px}
+.legend span{display:flex;align-items:center;gap:7px;font-size:11.5px;
+  color:var(--ink-2)}
+.legend i{width:13px;height:9px;border-radius:2px;flex:none}
+
+.foot{display:flex;flex-wrap:wrap;gap:7px 14px;align-items:center;
+  border-top:1px solid var(--rule);padding-top:9px;font-size:12.5px;
+  color:var(--ink-2);flex:none}
+button{font-family:var(--mono);font-size:11.5px;letter-spacing:.03em;
+  background:var(--panel);color:var(--ink);border:1px solid var(--rule);
+  border-radius:3px;padding:5px 10px;cursor:pointer}
+button:hover{border-color:var(--accent);color:var(--accent)}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+kbd{font-family:var(--mono);font-size:11px;background:var(--panel);
+  border:1px solid var(--rule);border-bottom-width:2px;border-radius:3px;
+  padding:1px 5px;color:var(--ink-2)}
+.sp{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+</style>
+
+<div class="at">
+  <header class="head">
+    <h1>Access&#8209;Twin<span>.</span></h1>
+    <p>Passing every ADA measurement and being reachable by a real body are
+      different properties. Watch four bodies try to use the same building.</p>
+    <div id="meta"></div>
+  </header>
+
+  <div class="body">
+    <div class="viewport">
+      <div id="stage"></div>
+      <div class="progress"><i id="bar"></i></div>
+      <div class="block">
+        <div class="no" id="sceneno">01 / 11</div>
+        <div>
+          <h2 id="kicker">Access-Twin</h2>
+          <p id="caption">Loading…</p>
+        </div>
+      </div>
+    </div>
+
+    <aside class="rail">
+      <div class="card">
+        <h3>Floor reached, by body</h3>
+        <div id="chips"></div>
+      </div>
+      <div class="card stat">
+        <span class="n" id="statn">—</span>
+        <span class="l" id="statl">—</span>
+      </div>
+      <div class="card">
+        <h3>Exclusion map key</h3>
+        <div class="legend">
+          <span><i style="background:var(--ok)"></i>all four bodies</span>
+          <span><i style="background:#8C9B45"></i>three of four</span>
+          <span><i style="background:var(--warn)"></i>two of four</span>
+          <span><i style="background:var(--bad)"></i>walking adult only</span>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="foot">
+    <button id="play">Pause</button>
+    <button id="restart">Restart</button>
+    <button id="prev">&larr;</button>
+    <button id="next">&rarr;</button>
+    <span>drag to orbit · scroll to zoom · <kbd>Space</kbd> restart
+      · <kbd>&larr;</kbd><kbd>&rarr;</kbd> scenes</span>
+    <span class="sp" id="run"></span>
+  </footer>
+</div>
