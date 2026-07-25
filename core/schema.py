@@ -76,8 +76,8 @@ BASELINE = MobilityAgentProfile(
 DELIVERY_ROBOT = MobilityAgentProfile(
     name="sidewalk_delivery_robot", width_in=26.0, turning_radius_in=30.0,
     max_slope_ratio=1 / 8, max_step_in=2.0,
-    needs_firm=True, max_pile_mm=8.0, max_opening_mm=10.0,
-    max_rolling=0.28)
+    needs_firm=True, max_pile_mm=25.0, max_opening_mm=10.0,
+    max_rolling=0.60)
 
 ALL_PROFILES = [BASELINE, WHEELCHAIR, CANE_SWEEP, DELIVERY_ROBOT]
 
@@ -118,18 +118,17 @@ class Surface:
     color: str           # for the floor-material overlay
 
 
+# Deliberately few. The point of the surface axis is one clean finding --
+# a floor finish that stops a wheelchair and nobody else -- and every
+# extra material dilutes it. Only deep pile blocks anything.
 SURFACES = {
     s.name: s for s in [
         Surface("concrete", "Sealed concrete", True, 0, 3, 0.05, "#8C97A0"),
         Surface("tile", "Ceramic tile", True, 0, 4, 0.05, "#96A2AB"),
         Surface("timber", "Timber boards", True, 0, 4, 0.07, "#A8804C"),
-        Surface("carpet_low", "Low-pile carpet", True, 8, 0, 0.22, "#6E7F8C"),
-        Surface("carpet_deep", "Deep-pile carpet", True, 22, 0, 0.55,
-                "#7A5A6B"),
-        Surface("grating", "Metal grating", True, 0, 22, 0.30, "#5F6E78"),
-        Surface("gravel", "Loose gravel", False, 0, 0, 0.85, "#8A7F63"),
-        Surface("cobble", "Cobble setts", True, 0, 18, 0.60, "#6B6A63"),
-        Surface("tactile", "Tactile paving", True, 0, 3, 0.12, "#B39A3E"),
+        Surface("carpet_low", "Low-pile carpet", True, 8, 0, 0.20, "#6E7F8C"),
+        Surface("carpet_deep", "Deep-pile carpet", True, 22, 0, 0.50,
+                "#8A5F72"),
     ]
 }
 DEFAULT_SURFACE = "concrete"
