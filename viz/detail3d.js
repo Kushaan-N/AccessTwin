@@ -174,16 +174,32 @@ function makeEnvironment(THREE, renderer, dark) {
 
 /* ---------------- furniture ---------------- */
 
+/* Geometry cache. The same 0.44 m chair leg was allocating a fresh
+   BufferGeometry every time it was drawn -- a thousand geometries for
+   a few dozen distinct shapes. */
+const _geoCache = new Map();
+function boxGeo(THREE, w, h, d) {
+  const k = `b${w.toFixed(3)},${h.toFixed(3)},${d.toFixed(3)}`;
+  if (!_geoCache.has(k)) _geoCache.set(k, new THREE.BoxGeometry(w, h, d));
+  return _geoCache.get(k);
+}
+function cylGeo(THREE, rt, rb, h, seg) {
+  const k = `c${rt.toFixed(3)},${rb.toFixed(3)},${h.toFixed(3)},${seg}`;
+  if (!_geoCache.has(k)) {
+    _geoCache.set(k, new THREE.CylinderGeometry(rt, rb, h, seg));
+  }
+  return _geoCache.get(k);
+}
+
 function box(THREE, mat, w, h, d, x, y, z, g) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  const m = new THREE.Mesh(boxGeo(THREE, w, h, d), mat);
   m.position.set(x, y, z);
   m.castShadow = m.receiveShadow = true;
   g.add(m);
   return m;
 }
 function cyl(THREE, mat, rt, rb, h, x, y, z, g, seg) {
-  const m = new THREE.Mesh(
-    new THREE.CylinderGeometry(rt, rb, h, seg || 18), mat);
+  const m = new THREE.Mesh(cylGeo(THREE, rt, rb, h, seg || 18), mat);
   m.position.set(x, y, z);
   m.castShadow = m.receiveShadow = true;
   g.add(m);
