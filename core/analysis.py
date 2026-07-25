@@ -560,8 +560,10 @@ def optimise(free, height, cell, spawn, goals, budget: float = 5000.0,
     same route are not additive).
     """
     pop = sample_population(n=pop_n, seed=seed)
+    base_area = 1.0
     grid = NavGrid(free, height, cell, ceiling=ceiling,
                    surface=surface, surface_order=surface_order)
+    base_area = grid.analyse(BASELINE, spawn)["reachable_m2"] or 1.0
     cands = propose_fixes(grid, free, height, cell, spawn, goals,
                           furniture=furniture)
     start = _score(free, height, cell, spawn, goals, pop, ceiling,
@@ -599,7 +601,16 @@ def optimise(free, height, cell, spawn, goals, budget: float = 5000.0,
                   "gain_pct": round(t["gain"], 1),
                   "area_gain": round(t["area_gain"], 3),
                   "pct_per_1k_usd": round(
-                      t["gain"] / max(t["fx"]["cost"], 1) * 1000, 2)}
+                      t["gain"] / max(t["fx"]["cost"], 1) * 1000, 2),
+                  # Square metres actually returned, per profile. A
+                  # percentage of a population is the right objective to
+                  # optimise; area returned is the number somebody
+                  # writing the cheque understands.
+                  "profile_m2": {
+                      nm: round((aft["pct"] -
+                                 start.get("by_profile", {})
+                                 .get(nm, aft)["pct"]) / 100.0 * base_area, 1)
+                      for nm, aft in t["s"].get("by_profile", {}).items()}}
                  for t in scored], key=lambda d: -d["pct_per_1k_usd"])
             # Keep each candidate's measured per-profile outcome so a
             # caller can tell "this fix opens a room on its own" from
@@ -647,8 +658,10 @@ def optimise(free, height, cell, spawn, goals, budget: float = 5000.0,
         cur_f, cur_h, cur = t["f2"], t["h2"], s
         spent += fx["cost"]
         chosen.append(fx["id"])
+        _ak, _ayx, _ar = fx["_apply"]
         log.append({
             "id": fx["id"], "kind": fx["kind"], "pos": fx["pos"],
+            "apply": {"kind": _ak, "radius_m": round(_ar * cell, 2)},
             "detail": fx["detail"], "cost": fx["cost"],
             "access_pct_after": s["pct_full_access"],
             "gain_pct": round(t["gain"], 1),
