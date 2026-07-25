@@ -29,6 +29,7 @@ from world3d import build3d
 from navgrid import NavGrid
 from pathing import GeoField
 from sweep import sweep, group
+from scipy import ndimage
 import analysis as A
 
 # Same validated categorical palette as the plan view, so a profile is
@@ -221,6 +222,7 @@ def main():
         pr["after_goals"] = {g: bool(after.reaches(p, spawn, c))
                              for g, c in goals.items()}
 
+    cf = counterfactual(args.seed, spawn, cell)
     sweepw = width_sweep(w, grid, spawn, cell)
     recall = score_recall(w, grid, profiles, free, cell)
 
@@ -237,6 +239,9 @@ def main():
         "remediation": opt,
         "recall": recall,
         "width_sweep": sweepw,
+        "counterfactual": cf,
+        "chokepoints": chokepoints(w, grid, spawn, cell, profiles, opt,
+                                   seed=args.seed),
     })
 
     os.makedirs(os.path.join(ROOT, "out"), exist_ok=True)
@@ -247,6 +252,192 @@ def main():
     print(f"population full access: {pop['pct_full_access']}% -> "
           f"{opt['after']['pct_full_access']}% after ${opt['spent_usd']:,}")
     print(f"recall: {recall['detected']}/{recall['planted']}")
+
+
+def counterfactual(seed, spawn, cell):
+    """Regenerate the same building with its contents removed.
+
+    Exact, not inferred: same walls, same ramp, same doors, furniture
+    omitted. Whatever the difference is, the furniture caused it -- and
+    that half of the problem is fixable by somebody with a trolley.
+    """
+    a = build3d(seed)
+    b = build3d(seed, with_contents=False)
+    fa, za, ca = a.rasterize()
+    fb, zb, cb = b.rasterize()
+    ga = NavGrid(fa, za, cell, ceiling=ca)
+    gb = NavGrid(fb, zb, cell, ceiling=cb)
+    # Both worlds are measured against the SAME denominator -- the floor
+    # a walking adult reaches once the contents are out of the way.
+    # Normalising each world to its own baseline made the walking adult
+    # read 100% -> 100% and hid the fact that it gains floor too.
+    base = gb.analyse(BASELINE, spawn)["reachable_m2"] or 1.0
+    base_a = base_b = base
+    out = {"furniture_m2": round(float((fb & ~fa).sum()) * cell ** 2, 1),
+           "profiles": {}}
+    for p in ALL_PROFILES:
+        ra = ga.analyse(p, spawn)
+        rb = gb.analyse(p, spawn)
+        pa = 100 * ra["reachable_m2"] / base_a
+        pb = 100 * rb["reachable_m2"] / base_b
+        opened = [g for g, c in a.goals.items()
+                  if gb.reaches(p, spawn, c) and not ga.reaches(p, spawn, c)]
+        out["profiles"][p.name] = {
+            "as_built_pct": round(pa, 1),
+            "contents_removed_pct": round(pb, 1),
+            "recovered_pct": round(pb - pa, 1),
+            "rooms_unlocked": opened,
+        }
+    out["note"] = ("Floor recovered by moving contents costs nothing to "
+                   "fix. Rooms that stay shut are shut by the building.")
+    return out
+
+
+MOVABLE = {"cafe_table", "cafe_chair", "stool", "planter", "lobby_seat",
+           "low_table", "reading_table", "bench"}
+FIXED_COST = {"seat": 5200, "stage": 3800, "reception": 2400,
+              "cafe_counter": 3100, "bookshelf": 900,
+              "display_panel": 700, "display_case": 700}
+
+
+def furniture_blockages(seed, spawn, cell, min_m2=1.2, top=8):
+    """Where the contents, specifically, are what stops somebody.
+
+    Ground truth rather than inference: difference each profile's
+    reachable set between the building as built and the same building
+    with its furniture omitted. Whatever it gains is furniture-caused,
+    and every one of those is fixable by somebody with a trolley.
+    """
+    a = build3d(seed)
+    b = build3d(seed, with_contents=False)
+    fa, za, ca = a.rasterize()
+    fb, zb, cb = b.rasterize()
+    ga = NavGrid(fa, za, cell, ceiling=ca)
+    gb = NavGrid(fb, zb, cell, ceiling=cb)
+
+    gained = np.zeros(fa.shape, dtype=bool)
+    per = {}
+    for p in ALL_PROFILES:
+        # Restricted to floor that is open in BOTH worlds. Without that
+        # this measures the footprint of the furniture -- the floor under
+        # a table becomes walkable once you remove the table -- rather
+        # than the floor the furniture cuts you off from. The giveaway
+        # was the walking adult appearing in every blockage while
+        # recovering 0.0% overall.
+        d = (gb.analyse(p, spawn)["reachable"]
+             & ~ga.analyse(p, spawn)["reachable"] & fa)
+        per[p.name] = d
+        gained |= d
+    if not gained.any():
+        return []
+
+    # Name each blockage after the nearest thing that is actually in the
+    # way, so the popup says "relocate the cafe seating" rather than
+    # quoting a coordinate.
+    furn = [s for s in a.solids if s.kind == "furniture"]
+    lab, n = ndimage.label(gained, structure=np.ones((3, 3)))
+    out = []
+    for i in range(1, n + 1):
+        m = lab == i
+        area = float(m.sum()) * cell ** 2
+        if area < min_m2:
+            continue
+        ys, xs = np.nonzero(m)
+        cx, cy = float(ys.mean()) * cell, float(xs.mean()) * cell
+        who = sorted(nm for nm, d in per.items() if (d & m).any())
+        near, best = None, 1e9
+        for f in furn:
+            fx = max(f.x0, min(cx, f.x1))
+            fy = max(f.y0, min(cy, f.y1))
+            dd = (fx - cx) ** 2 + (fy - cy) ** 2
+            if dd < best:
+                best, near = dd, f
+        tag = near.tag if near else "contents"
+        label = tag.replace("_", " ")
+        movable = tag in MOVABLE
+        cost = 0 if movable else FIXED_COST.get(tag, 1500)
+        out.append({
+            "id": f"{'move' if movable else 'reconfig'}@{cx:.1f},{cy:.1f}",
+            "kind": "declutter" if movable else "reconfigure",
+            "verdict": "move" if movable else "reconfigure",
+            "pos": [round(cx, 2), round(cy, 2)],
+            "detail": (f"relocate the {label} — returns {area:.0f} m\u00b2 "
+                       f"of floor" if movable else
+                       f"re-lay the fixed {label} — returns {area:.0f} m\u00b2 "
+                       f"of floor"),
+            "cost": cost, "excludes": who, "goals_blocked": [],
+            "opens_alone": [], "gain_pct": 0.0, "chosen": False,
+            "area_m2": round(area, 1), "movable": movable,
+        })
+    out.sort(key=lambda d: -d["area_m2"])
+    return out[:top]
+
+
+def chokepoints(w, grid, spawn, cell, profiles, opt, seed=7):
+    """Every blockage, with a verdict: move it, build it, or neither.
+
+    Sources are already computed and merely joined here -- the fix
+    candidates carry kind and cost, the barrier finder carries which
+    body was stopped where, and the optimiser has MEASURED what each
+    fix returns by rebuilding the building with it applied.
+
+    The third verdict is the important one. A barrier whose repair opens
+    nothing on its own is not cheap-and-easy, it is one of several that
+    must all happen -- and a marker that only ever says move-or-build
+    cannot express that.
+    """
+    stand = {d["id"]: d for d in opt.get("standalone_scores", [])}
+    chosen_ids = {c["id"] for c in opt.get("chosen", [])}
+    base_goals = {k: v["goals"]
+                  for k, v in (opt.get("baseline_by_profile") or {}).items()}
+
+    # who is stopped where
+    blocked = []
+    for pr in profiles:
+        for gname, j in pr["journeys"].items():
+            for b in j.get("barriers", []):
+                blocked.append((b["pos"][0], b["pos"][1], pr["name"],
+                                gname, b))
+
+    out = []
+    for c in opt.get("candidate_menu", []):
+        px, py = c["pos"][0], c["pos"][1]
+        near = [t for t in blocked
+                if abs(t[0] - px) <= 1.8 and abs(t[1] - py) <= 1.8]
+        who = sorted({t[2] for t in near})
+        goals_hit = sorted({t[3] for t in near})
+
+        sc = stand.get(c["id"], {})
+        after = sc.get("by_profile", {})
+        opens = []
+        for name, aft in after.items():
+            if name in base_goals and aft["goals"] > base_goals[name]:
+                opens.append(name)
+
+        furniture = c["kind"] == "declutter"
+        if furniture:
+            verdict = "move"
+        elif opens:
+            verdict = "build"
+        else:
+            verdict = "combined"
+
+        out.append({
+            "id": c["id"],
+            "kind": c["kind"],
+            "verdict": verdict,
+            "pos": [px, py],
+            "detail": c["detail"],
+            "cost": 0 if furniture else c["cost"],
+            "excludes": who,
+            "goals_blocked": goals_hit,
+            "opens_alone": opens,
+            "gain_pct": sc.get("gain_pct", 0.0),
+            "chosen": c["id"] in chosen_ids,
+        })
+    out.extend(furniture_blockages(seed, spawn, cell))
+    out.sort(key=lambda d: (d["verdict"] != "move", d["cost"]))
+    return out
 
 
 def width_sweep(w, grid, spawn, cell, lo=18.0, hi=48.0, step=2.0):
