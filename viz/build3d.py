@@ -56,7 +56,8 @@ def main():
     # </script> inside JSON would close the tag early.
     blob = json.dumps(scene, separators=(",", ":")).replace("</", "<\\/")
 
-    body = (shell
+    body = ('<title>Access-Twin \u2014 who can actually get through</title>\n'
+            + shell
             # Capture load-time and animation-loop errors onto window so a
             # failure is inspectable even when devtools is not attached.
             + '\n<script>window.__ERR=[];'
