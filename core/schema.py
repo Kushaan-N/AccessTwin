@@ -11,6 +11,7 @@ IN_PER_M = 39.3701
 class ViolationType(str, Enum):
     CLEARANCE = "clearance_width"
     SURFACE = "floor_surface"
+    COUNTER = "counter_height"
     SLOPE = "slope_gradient"
     TURNING_RADIUS = "turning_radius"
     HEAD_CLEARANCE = "head_clearance"
@@ -91,6 +92,8 @@ ADA_CITATIONS = {
     ViolationType.SURFACE: "ADA 2010 §302 — floor surfaces firm, stable and "
                            "slip-resistant; §302.2 pile ≤ 1/2in; "
                            "§302.3 openings ≤ 1/2in",
+    ViolationType.COUNTER: "ADA 2010 §904.4.1 — sales and service counters, "
+                           "max 865mm above the floor",
 }
 
 
