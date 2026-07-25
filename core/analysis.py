@@ -662,12 +662,16 @@ def optimise(free, height, cell, spawn, goals, budget: float = 5000.0,
             a, b = cur.get("by_profile", {}), t["s"].get("by_profile", {})
             for name, before in a.items():
                 after = b.get(name, before)
-                if after["goals"] < before["goals"]:
-                    return (f"{name} loses access to "
-                            f"{before['goals'] - after['goals']} destination(s)")
+                lost = before["goals"] - after["goals"]
+                who = name.replace("_", " ")
+                if lost > 0:
+                    return (f"the {who} loses a destination it has today"
+                            if lost == 1 else
+                            f"the {who} loses {lost} destinations it has today")
                 if after["pct"] < before["pct"] - 1.0:
-                    return (f"{name} loses {before['pct'] - after['pct']:.0f} "
-                            f"points of reachable floor")
+                    return (f"the {who} loses "
+                            f"{before['pct'] - after['pct']:.0f} points of "
+                            f"reachable floor")
             return None
 
         for t in scored:
