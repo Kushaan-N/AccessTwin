@@ -373,6 +373,53 @@ function drawRoute(path, color, arrived) {
   }
 }
 
+/* ---------- room state overlays ---------- */
+/* One translucent pad per room, recoloured live as the body widens.
+   Named rooms switching off one at a time reads from the back of a
+   room in a way a pixel mask never does. */
+const roomPads = {};
+const roomGroup = new THREE.Group();
+scene.add(roomGroup);
+D.rooms.forEach(r => {
+  const w = r.x1 - r.x0, d = r.y1 - r.y0;
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(w, d),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true,
+                                  opacity: 0.0, depthWrite: false }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.copy(v3(r.x0 + w / 2, r.y0 + d / 2, r.z + 0.03));
+  m.renderOrder = 3;
+  roomGroup.add(m);
+  roomPads[r.name] = m;
+});
+roomGroup.visible = false;
+
+const SWEEP = D.width_sweep || [];
+let widthIdx = 0;
+function applyWidth(i) {
+  if (!SWEEP.length) return;
+  widthIdx = Math.max(0, Math.min(SWEEP.length - 1, Math.round(i)));
+  const row = SWEEP[widthIdx];
+  const open = new THREE.Color(TOK.ok), shut = new THREE.Color(TOK.bad);
+  Object.entries(row.rooms).forEach(([name, ok]) => {
+    const pad = roomPads[name];
+    if (!pad) return;
+    pad.material.color.copy(ok ? open : shut);
+    pad.material.opacity = ok ? 0.16 : 0.42;
+  });
+  const sl = el("widthslider");
+  if (sl && Number(sl.value) !== widthIdx) sl.value = String(widthIdx);
+  el("widthval").textContent = row.width_in.toFixed(0) + "\u2033";
+  el("roomstate").innerHTML = Object.entries(row.rooms)
+    .sort((a, b) => Number(a[1]) - Number(b[1]))
+    .map(([n, ok]) => `<span class="${ok ? "on" : "off"}">` +
+         `<i style="background:${ok ? "var(--ok)" : "var(--bad)"}"></i>` +
+         `${n}${ok ? "" : " \u2014 closed"}</span>`).join("");
+  el("statn").textContent = row.pct.toFixed(0) + "%";
+  el("statl").textContent = "of the floor, at " + row.width_in.toFixed(0) +
+    " inches wide";
+}
+
 /* ---------- agents ---------- */
 function makeAgent(profile) {
   const g = new THREE.Group();
@@ -754,6 +801,57 @@ const SCENES = [
     }
   },
   {
+    id: "eye", dur: 11.0, kicker: "At eye level", profile: "wheelchair",
+    cap: `The same approach, from the chair. <em>Nothing about this view is
+          unusual until it stops.</em> That is the point: the failure is not
+          visible from the corridor, it is not visible on the drawing, and it
+          is not visible to anybody who does not have to make the turn.`,
+    stat: () => ["28\u2033", "clear, where 32 are required"],
+    walk: [["wheelchair", "community_room", 0]],
+    enter() {
+      hideAgents(); clearMarkers(); decalGroup.visible = false;
+      roomGroup.visible = false;
+      // Full-height walls and no floating room labels: from inside, the
+      // doll's-house section and the plan annotation both break the
+      // illusion that you are actually in the room.
+      setWallCut(1.0);
+      roomLabels.visible = false;
+    },
+    tick(t) { eyeLevel("wheelchair", 2.5); },
+    onStop(pname, goal) {
+      (journeyOf(pname, goal).barriers || []).slice(0, 1).forEach(b =>
+        addMarker(b.pos[0], b.pos[1], b.pos[2],
+                  `${n0(b.aperture_in)}\u2033 clear`,
+                  "needs 32\u2033 — ADA 404.2.3", TOK.bad));
+    }
+  },
+  {
+    id: "width", dur: 20.0, kicker: "Where does it close?",
+    cap: `Drag the slider. Every room is re-tested as the body widens, and
+          they switch off one at a time. <em>At 28 inches the community room
+          and the accessible WC go dark; at 32 — a standard powered
+          wheelchair — the lift follows.</em> The gallery is never open at any
+          width, because it was never a width problem.`,
+    stat: () => ["28\u2033", "where the first rooms close"],
+    slider: true,
+    enter() {
+      hideAgents(); clearMarkers(); decalGroup.visible = false;
+      roomGroup.visible = true; setWallCut(0.16);
+      el("widthcard").hidden = false;
+      applyWidth(0);
+      lookAt(BW / 2, -4, 34, BW / 2, BH / 2, 0);
+    },
+    tick(t) {
+      // Sweep on its own so an unattended demo still tells the story;
+      // touching the slider hands control over for the rest of the scene.
+      if (!sliderTouched) {
+        const k = Math.min(1, t / (this.dur * 0.72));
+        applyWidth(k * (SWEEP.length - 1));
+      }
+      lookAt(BW / 2 + Math.sin(t * 0.22) * 6, -4, 34, BW / 2, BH / 2, 0);
+    }
+  },
+  {
     id: "islands", dur: 10.0, kicker: "The finding",
     cap: `Those two regions are <em>geometrically flawless inside</em> — wide,
           dead flat, with turning circles to spare. They are also completely
@@ -886,6 +984,22 @@ const SCENES = [
 
 function hideAgents() { D.profiles.forEach(p => p.agent.visible = false); }
 
+/* Eye level. Camera at the body's own head height, just behind it,
+   looking where it is going -- so the doorway that stops the chair
+   arrives at the viewer the way it arrives at the person. */
+function eyeLevel(pname, back) {
+  const p = P[pname], st = p._walkState;
+  if (!st || !st.sample) return;
+  const s = st.sample;
+  const eye = (p.agent.userData.parts.eyeH || 1.5);
+  const dx = s.dir[0], dy = s.dir[1];
+  const b = back || 2.4;
+  // Just above and behind the head rather than inside it: close enough
+  // to be their view, far enough that the body reads as a body.
+  lookAt(s.p[0] - dx * b, s.p[1] - dy * b, s.p[2] + eye + 0.42,
+         s.p[0] + dx * 9, s.p[1] + dy * 9, s.p[2] + eye * 0.80);
+}
+
 /* Follow the agent that is currently walking, from behind and above. */
 function follow(pname, t, back, side, up) {
   back *= 0.62; side *= 0.62; up *= 0.72;
@@ -969,11 +1083,18 @@ function applyScene(i) {
   clearMarkers();
   resetWalks(s);
   userCam = false;
+  sliderTouched = false;
+  roomLabels.visible = true;
+  if (!s.slider) {
+    el("widthcard").hidden = true;
+    roomGroup.visible = false;
+  }
   if (s.enter) s.enter();
 }
 
 /* ---------- loop ---------- */
 let sceneI = 0, sceneT = 0, playing = true, clock = 0, last = 0;
+let sliderTouched = false;
 const TOTAL = SCENES.reduce((a, s) => a + s.dur, 0);
 
 function goto(i) {
@@ -1044,6 +1165,10 @@ el("play").addEventListener("click", () => {
   el("play").textContent = playing ? "Pause" : "Play";
 });
 el("restart").addEventListener("click", () => goto(0));
+el("widthslider").addEventListener("input", e => {
+  sliderTouched = true;
+  applyWidth(Number(e.target.value));
+});
 el("prev").addEventListener("click", () => goto(sceneI - 1));
 el("next").addEventListener("click", () => goto(sceneI + 1));
 addEventListener("keydown", e => {
