@@ -208,7 +208,7 @@ def main():
                                 pop=A.sample_population(args.pop, args.seed))
     det = A.detour(grid, spawn, goals)
     opt = A.optimise(free, floor_z, cell, spawn, goals, budget=args.budget,
-                     seed=args.seed, pop_n=70, ceiling=ceil_z)
+                     seed=args.seed, pop_n=args.pop, ceiling=ceil_z)
     fixed_free, fixed_height = opt.pop("_final_world")
     after = NavGrid(fixed_free, fixed_height, cell, ceiling=ceil_z)
     after_base = after.analyse(BASELINE, spawn)["reachable_m2"] or 1.0
