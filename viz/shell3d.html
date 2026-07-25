@@ -149,21 +149,52 @@
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion: reduce){.boot span{animation:none}}
 .boot[hidden]{display:none}
+/* Left-aligned on purpose: centred, the card covered the building it is
+   introducing, and a dialog over a dark rectangle reads as a page that
+   failed to load. Card left, hero right. */
 .intro{position:absolute;inset:0;z-index:10;display:flex;
-  align-items:center;justify-content:center;padding:20px;
-  background:color-mix(in srgb, var(--stage-bg) 76%, transparent)}
+  align-items:center;justify-content:flex-start;
+  padding:22px 22px 22px 30px;overflow:auto;
+  background:radial-gradient(135% 105% at 46% 47%,
+    transparent 0%,
+    color-mix(in srgb, var(--stage-bg) 34%, transparent) 54%,
+    color-mix(in srgb, var(--stage-bg) 82%, transparent) 100%)}
 .intro[hidden]{display:none}
-.introcard{background:var(--sheet);border:1px solid var(--rule);
-  border-radius:5px;padding:20px 22px;max-width:430px;
-  box-shadow:0 18px 50px rgba(0,0,0,.4)}
-.introcard h3{margin:0 0 9px;font-size:17px;line-height:1.3;
-  text-wrap:balance}
-.introcard p{margin:0 0 14px;font-size:13.5px;color:var(--ink-2);
-  line-height:1.5}
-.introbtns{display:flex;gap:8px;flex-wrap:wrap}
-.introbtns button{font-size:12px;padding:7px 12px}
-.introhint{margin:13px 0 0 !important;font-family:var(--mono);
-  font-size:10.5px;color:var(--ink-3);letter-spacing:.04em}
+.introcard{background:color-mix(in srgb, var(--sheet) 96%, transparent);
+  border:1px solid var(--rule);border-top:2px solid var(--accent);
+  border-radius:6px;padding:22px 26px 20px;max-width:496px;
+  box-shadow:0 24px 64px rgba(0,0,0,.5)}
+.introcard .eyebrow{display:flex;align-items:center;gap:7px;margin:0 0 12px;
+  font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-3)}
+.introcard .eyebrow i{width:6px;height:6px;border-radius:50%;
+  background:var(--accent);flex:none}
+.introcard h3{margin:0 0 11px;font-size:22px;line-height:1.22;
+  letter-spacing:-.015em;text-wrap:balance;font-weight:600}
+.introcard h3 em{font-style:normal;color:var(--accent)}
+.introcard p{margin:0 0 16px;font-size:13.5px;color:var(--ink-2);
+  line-height:1.55}
+.introstats{list-style:none;display:flex;gap:10px;margin:0 0 18px;padding:13px 0;
+  border-top:1px solid var(--rule-soft);
+  border-bottom:1px solid var(--rule-soft)}
+.introstats li{flex:1;min-width:0}
+.introstats b{display:block;font-family:var(--mono);font-size:19px;
+  font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;
+  line-height:1.1;color:var(--ink)}
+.introstats span{display:block;margin-top:3px;font-size:10.5px;
+  line-height:1.35;color:var(--ink-3)}
+.introbtns{display:flex;gap:9px;flex-wrap:wrap;align-items:stretch}
+.introbtns button{font-size:12.5px;padding:9px 15px;border-radius:4px}
+.introbtns button em{font-style:normal;color:var(--ink-3);margin-left:5px;
+  font-size:11px}
+.introbtns .prim{background:var(--accent);color:var(--stage-bg);
+  border-color:var(--accent);font-weight:600}
+.introbtns .prim:hover{filter:brightness(1.1);color:var(--stage-bg)}
+.introhint{margin:14px 0 0 !important;font-family:var(--mono);
+  font-size:10px;color:var(--ink-3);letter-spacing:.05em}
+/* Below this the stage is too narrow to hold a building beside the card. */
+@media(max-width:900px){.intro{justify-content:center;padding:22px}}
+@media(max-width:560px){.introstats{flex-wrap:wrap}}
 .nogl{position:absolute;inset:0;display:flex;flex-direction:column;
   align-items:center;justify-content:center;gap:8px;padding:24px;
   text-align:center;background:var(--stage-bg);z-index:9}
@@ -368,17 +399,25 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--panel);
       <div id="intro" class="intro" hidden role="dialog"
            aria-labelledby="introh" aria-modal="false">
         <div class="introcard">
-          <h3 id="introh">Nobody measured this building. Four bodies walked it.</h3>
+          <p class="eyebrow"><i></i>Access&#8209;Twin · accessibility audit</p>
+          <h3 id="introh">Four bodies walked this building.<br>
+            <em>Three of them got stuck.</em></h3>
           <p>A wheelchair, a cane user, a delivery robot and a walking adult
             were driven through a generated civic centre. Everywhere one of
-            them stopped is an issue — priced, and grouped by whether it takes
-            a trolley or a builder.</p>
+            them stopped is an issue &mdash; located, priced, and sorted by
+            whether it needs a trolley or a builder.</p>
+          <ul class="introstats">
+            <li><b id="isDefects">&mdash;</b><span></span></li>
+            <li><b id="isIssues">&mdash;</b><span></span></li>
+            <li><b id="isCost">&mdash;</b><span></span></li>
+          </ul>
           <div class="introbtns">
-            <button id="introaudit" class="prim">See the issues</button>
-            <button id="introwalk">Watch it happen · 3 min</button>
+            <button id="introaudit" class="prim">See the issues &rsaquo;</button>
+            <button id="introwalk">Watch the walkthrough
+              <em id="isRuntime"></em></button>
           </div>
-          <p class="introhint">Drag to orbit · scroll to zoom · click any
-            marker</p>
+          <p class="introhint">drag to orbit · scroll to zoom ·
+            click any marker</p>
         </div>
       </div>
       <div id="nogl" class="nogl" hidden>

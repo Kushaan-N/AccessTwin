@@ -48,27 +48,7 @@ try {
   if (!renderer.getContext()) throw new Error("no context");
 } catch (err) {
   if (el0("boot")) el0("boot").hidden = true;
-
-/* A first-time viewer lands on a panel of numbers with no idea what
-   building this is or why it is being audited. One card, two doors. */
-(function intro() {
-  const box = el0("intro");
-  if (!box || wantsWalk) return;
-  box.hidden = false;
-  playing = false;
-  const close = walk => {
-    box.hidden = true;
-    if (walk) { setInspect(false); playing = true; goto(0); }
-    else { playing = false; }
-  };
-  el0("introaudit").addEventListener("click", () => close(false));
-  el0("introwalk").addEventListener("click", () => close(true));
-  box.addEventListener("click", e => { if (e.target === box) close(false); });
-  addEventListener("keydown", function esc(e) {
-    if (e.key === "Escape" && !box.hidden) { close(false); }
-  });
-  el0("introaudit").focus();
-})();
+  if (el0("intro")) el0("intro").hidden = true;
   if (el0("nogl")) el0("nogl").hidden = false;
   const det = el0("findings");
   if (det) det.open = true;
@@ -2427,7 +2407,20 @@ goto(0);
 // #walkthrough opens the film instead of the audit, so either view can
 // be shared as a link.
 const wantsWalk = location.hash.toLowerCase().indexOf("walk") >= 0;
-setInspect(!wantsWalk);
+// With the intro card up we hold a full-height hero shot instead. A
+// knee-height cutaway behind a dialog reads as a half-loaded page, and
+// deferring the cut buys the reveal as the transition into the audit.
+const showIntro = !wantsWalk && !!el0("intro");
+if (showIntro) {
+  setWallCut(1);
+  // Framed off-centre on purpose: the card sits left, so the aim point
+  // is east of the building centre to push the atrium into the clear
+  // half of the stage. Under 900px the card recentres and this shot
+  // just reads as a wide establishing view.
+  lookAt(-14, -22, 26, 30, 12, 0, true);
+} else {
+  setInspect(!wantsWalk);
+}
 if (wantsWalk) playing = true;
 // One synchronous draw before the spinner goes, so the first thing the
 // viewer sees is the building rather than a flash of empty stage.
@@ -2438,13 +2431,53 @@ if (el0("boot")) el0("boot").hidden = true;
    building this is or why it is being audited. One card, two doors. */
 (function intro() {
   const box = el0("intro");
-  if (!box || wantsWalk) return;
+  if (!showIntro) return;
+  // Read the headline numbers off the analysis rather than writing them
+  // into the copy. A hand-typed "13 defects" survives a reseed that
+  // plants twelve, and the front door is the worst place to be wrong.
+  const paid = ISSUES.filter(i => i.cost > 0);
+  const free = ISSUES.length - paid.length;
+  const money = paid.reduce((a, i) => a + i.cost, 0);
+  const mins = Math.floor(TOTAL / 60), secs = Math.round(TOTAL % 60);
+  const put = (id, big, small) => {
+    const b = el0(id); if (!b) return;
+    b.textContent = big;
+    if (small) b.nextElementSibling.innerHTML = small;
+  };
+  put("isDefects", D.recall.planted,
+    `planted defects<br>all ${D.recall.detected} found blind`);
+  put("isIssues", ISSUES.length,
+    "issues located<br>each with its fix");
+  put("isCost", "$" + money.toLocaleString("en-US"),
+    `of building work<br>${free} fixes cost nothing`);
+  const rt = el0("isRuntime");
+  if (rt) rt.textContent = `· ${mins}:${String(secs).padStart(2, "0")}`;
+
+  const chrome = ["navprev", "navnext"].map(el0).filter(Boolean);
+  chrome.forEach(n => { n.style.visibility = "hidden"; });
+
+  // The overlay is positioned against the viewport, which is the stage
+  // *plus* the caption block underneath it. Centring against that puts
+  // the card ~80px low, sitting on the caption. Pad the difference out so
+  // "centred" means centred on the building. (The remediation bar hit
+  // exactly this; the containing block is not the one you are looking at.)
+  const centreOnStage = () => {
+    const st = el0("stage"), vp = box.parentElement;
+    if (!st || !vp) return;
+    const gap = vp.getBoundingClientRect().bottom
+              - st.getBoundingClientRect().bottom;
+    box.style.paddingBottom = Math.max(22, gap + 22) + "px";
+  };
+  centreOnStage();
+  addEventListener("resize", () => { if (!box.hidden) centreOnStage(); });
+
   box.hidden = false;
   playing = false;
   const close = walk => {
     box.hidden = true;
+    chrome.forEach(n => { n.style.visibility = ""; });
     if (walk) { setInspect(false); playing = true; goto(0); }
-    else { playing = false; }
+    else { setInspect(true); }
   };
   el0("introaudit").addEventListener("click", () => close(false));
   el0("introwalk").addEventListener("click", () => close(true));
