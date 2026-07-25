@@ -223,8 +223,64 @@ function rampGeometry(w, d, h0, h1, axis) {
 }
 
 const SOLID_MESHES = [];
-function buildSolids() {
+
+/* Identical furniture is drawn once.
+   84 auditorium seats and 37 cafe chairs were each assembled from five
+   or six little boxes, giving 1,059 draw calls to put 36,000 triangles
+   on screen -- about 34 triangles per call, which is entirely
+   submission-bound. Anything repeated enough times is built once as a
+   prototype and drawn as an InstancedMesh, so 84 seats cost five calls
+   instead of four hundred, in the shadow pass as well as the main one. */
+const INSTANCE_MIN = 6;
+
+function instanceFurniture() {
+  const groups = new Map();
   D.solids.forEach(s => {
+    if (s.kind !== "furniture" && s.kind !== "fixture") return;
+    const w = +(s.x1 - s.x0).toFixed(3), d = +(s.y1 - s.y0).toFixed(3),
+          h = +(s.z1 - s.z0).toFixed(3);
+    const key = `${s.tag}|${w}|${d}|${h}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(s);
+  });
+
+  const handled = new Set();
+  groups.forEach(list => {
+    if (list.length < INSTANCE_MIN) return;
+    const proto = makeFurniture(THREE, list[0], MAT);
+    if (!proto) return;
+    proto.updateMatrixWorld(true);
+    const parts = [];
+    proto.traverse(o => { if (o.isMesh) parts.push(o); });
+    if (!parts.length) return;
+
+    parts.forEach(part => {
+      const im = new THREE.InstancedMesh(part.geometry, part.material,
+                                         list.length);
+      const bulk = (list[0].x1 - list[0].x0) * (list[0].z1 - list[0].z0);
+      im.castShadow = bulk > 0.25;
+      im.receiveShadow = true;
+      const m = new THREE.Matrix4(), t = new THREE.Matrix4();
+      list.forEach((s, i) => {
+        const w = s.x1 - s.x0, d = s.y1 - s.y0;
+        const p = v3(s.x0 + w / 2, s.y0 + d / 2, s.z0);
+        t.makeTranslation(p.x, p.y, p.z);
+        m.multiplyMatrices(t, part.matrix);
+        im.setMatrixAt(i, m);
+      });
+      im.instanceMatrix.needsUpdate = true;
+      im.frustumCulled = false;   // one bounding sphere for a whole room
+      building.add(im);
+    });
+    list.forEach(s => handled.add(s));
+  });
+  return handled;
+}
+
+function buildSolids() {
+  const instanced = instanceFurniture();
+  D.solids.forEach(s => {
+    if (instanced.has(s)) return;
     const w = s.x1 - s.x0, d = s.y1 - s.y0, h = s.z1 - s.z0;
     if (w <= 0 || d <= 0 || h <= 0) return;
     // Only slabs take a finish material: a ramp with a concrete surface
@@ -1145,6 +1201,7 @@ function selectIssue(i) {
   });
   showChokepoint({ ...it, verdict: it.verdict });
   renderIssueList();
+  syncNav();
 }
 
 function setInspect(on) {
@@ -1187,6 +1244,7 @@ function setInspect(on) {
     el("bar").style.width = "100%";
     el("live").textContent =
       `Inspect mode. ${ISSUES.length} issues listed.`;
+    syncNav();
   } else {
     hideChokepoint();
     goto(sceneI);
@@ -1655,6 +1713,7 @@ function applyScene(i) {
     roomGroup.visible = false;
   }
   if (s.enter) s.enter();
+  syncNav();
 }
 
 /* ---------- loop ---------- */
@@ -1759,6 +1818,37 @@ el("play").addEventListener("click", () => {
 });
 el("restart").addEventListener("click", () => goto(0));
 el("inspect").addEventListener("click", () => setInspect(!inspecting));
+
+/* The chevrons do whatever "next" means where you are: the next scene
+   in the walkthrough, the next issue in the audit. */
+function step(dir) {
+  if (inspecting) {
+    const vis = [...el("islist").querySelectorAll("button[data-i]")]
+      .map(b => Number(b.dataset.i));
+    if (!vis.length) return;
+    const at = vis.indexOf(isSel);
+    selectIssue(dir > 0
+      ? vis[(at + 1) % vis.length]
+      : vis[(at <= 0 ? vis.length : at) - 1]);
+  } else {
+    goto(sceneI + dir);
+  }
+  syncNav();
+}
+function syncNav() {
+  const hint = el("navhint");
+  if (!hint) return;
+  if (inspecting) {
+    const n = ISSUES.length;
+    const at = isSel === null ? 0 : isSel + 1;
+    hint.textContent = `next issue · ${at}/${n}`;
+  } else {
+    hint.textContent = `next · ${sceneI + 2 > SCENES.length ? 1 : sceneI + 2}` +
+      `/${SCENES.length}`;
+  }
+}
+el("navnext").addEventListener("click", () => step(1));
+el("navprev").addEventListener("click", () => step(-1));
 el("iscopy").addEventListener("click", async () => {
   // A worklist you cannot get out of the page is a demo, not a tool.
   const esc = v => `"${String(v).replace(/"/g, '""')}"`;
@@ -1853,6 +1943,8 @@ new MutationObserver(mo).observe(document.documentElement,
 window.__AT3 = Object.assign(window.__AT3 || {}, {
   showCP: showChokepoint,
   camera: camera,
+  renderer: renderer,
+  scene: scene,
   seek(index, seconds, dt) {
     goto(index);   // NB: not named `scene` -- that shadows the THREE.Scene
     const h = dt || 1 / 60;
