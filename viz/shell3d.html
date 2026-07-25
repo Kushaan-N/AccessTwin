@@ -208,6 +208,8 @@ button.prim[aria-pressed="true"]{background:var(--accent);
   align-items:baseline}
 .islist .r1 em{font-style:normal;font-family:var(--mono);font-size:11px;
   letter-spacing:.06em;text-transform:uppercase}
+.islist .r1 .roi{font-style:normal;color:var(--ink-3);font-size:10.5px;
+  margin-left:5px}
 .islist .r1 strong{font-family:var(--mono);font-size:12px;
   font-variant-numeric:tabular-nums;white-space:nowrap}
 .islist .r2{color:var(--ink-2);margin-top:3px;line-height:1.35}
@@ -236,6 +238,16 @@ button.prim[aria-pressed="true"]{background:var(--accent);
 .nav.next{right:10px}
 .ispanel:not([hidden]) ~ .nav.next{right:352px}
 @media (prefers-reduced-motion: reduce){.nav{transition:none}}
+
+.remedy{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);
+  z-index:6;display:flex;align-items:center;gap:11px;
+  background:color-mix(in srgb, var(--sheet) 88%, transparent);
+  border:1px solid var(--rule);border-radius:5px;padding:9px 13px}
+.remedy[hidden]{display:none}
+.remedy button{font-size:12.5px;padding:7px 13px}
+.remedy span{font-family:var(--mono);font-size:11px;color:var(--ink-2);
+  letter-spacing:.05em}
+.remedy.done button{border-color:var(--ok);color:var(--ok)}
 
 .cpsum{position:absolute;left:12px;top:12px;display:flex;gap:8px;
   flex-wrap:wrap;pointer-events:none;z-index:4}
@@ -334,6 +346,10 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--panel);
       <button id="navnext" class="nav next" aria-label="Next">
         <span>&#8250;</span><b id="navhint"></b></button>
       <div id="cpsum" class="cpsum" hidden></div>
+      <div id="remedy" class="remedy" hidden>
+        <button id="remedybtn" class="prim">Autonomously remediate</button>
+        <span id="remedystate"></span>
+      </div>
       <div id="ispanel" class="ispanel" hidden>
         <div class="ishead">
           <div>
@@ -346,6 +362,7 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--panel);
             <button data-f="move">Free</button>
             <button data-f="build">Build</button>
             <button data-f="combined">Combined</button>
+            <button id="issort" title="Sort by cost per m² returned">ROI</button>
             <button id="iscopy" title="Copy the worklist as CSV">Copy</button>
           </div>
         </div>
