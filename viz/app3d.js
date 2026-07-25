@@ -897,6 +897,15 @@ function showChokepoint(c) {
 function hideChokepoint() { cpOpen = null; el("cppop").hidden = true; }
 
 stage.addEventListener("click", e => {
+  if (inspecting) {
+    const r = stage.getBoundingClientRect();
+    ndc.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+    ndc.y = -((e.clientY - r.top) / r.height) * 2 + 1;
+    ray.setFromCamera(ndc, camera);
+    const h = ray.intersectObjects(isHits, false)[0];
+    if (h) selectIssue(h.object.userData.idx);
+    return;
+  }
   if (!cpGroup.visible) return;
   const r = stage.getBoundingClientRect();
   ndc.x = ((e.clientX - r.left) / r.width) * 2 - 1;
@@ -944,6 +953,159 @@ stage.addEventListener("wheel", e => {
   userCam = true;
 }, { passive: false });
 let userCam = false;
+
+/* ---------- inspect mode ---------- */
+/* The walkthrough is a story; this is the worklist. It leaves the
+   guided sequence entirely: every issue at once, free camera, and a
+   list you can work down. Selecting one flies the camera to it. */
+const ISSUES = D.issues || [];
+let inspecting = false, isFilter = "all", isSel = null;
+
+const VCOL = () => ({ move: TOK.ok, reconfigure: TOK.warn,
+                      build: TOK.bad, combined: TOK.bad });
+const VLABEL = { move: "free · move it", reconfigure: "re-lay fixed",
+                 build: "reconstruction", combined: "combined works" };
+
+const isGroup = new THREE.Group();
+scene.add(isGroup);
+const isHits = [];
+
+function buildIssueMarkers() {
+  while (isGroup.children.length) isGroup.children.pop();
+  isHits.length = 0;
+  const col = VCOL();
+  ISSUES.forEach((it, i) => {
+    const g = new THREE.Group();
+    g.position.copy(v3(it.pos[0], it.pos[1], 0));
+    const cc = new THREE.Color(col[it.verdict] || TOK.bad);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.32, 0.46, 28),
+      new THREE.MeshBasicMaterial({ color: cc, transparent: true,
+        opacity: 0.9, side: THREE.DoubleSide, depthWrite: false,
+        depthTest: false }));
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.05;
+    ring.renderOrder = 30; g.add(ring);
+    const post = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.04, 0.04, 2.1, 8),
+      new THREE.MeshBasicMaterial({ color: cc, transparent: true,
+        opacity: 0.45, depthWrite: false, depthTest: false }));
+    post.position.y = 1.05; post.renderOrder = 30; g.add(post);
+    const knob = new THREE.Mesh(
+      new THREE.SphereGeometry(0.16, 16, 12),
+      new THREE.MeshBasicMaterial({ color: cc, depthTest: false }));
+    knob.position.y = 2.15; knob.renderOrder = 31; g.add(knob);
+    const hit = new THREE.Mesh(new THREE.SphereGeometry(0.9, 10, 8),
+      new THREE.MeshBasicMaterial({ visible: false }));
+    hit.position.y = 1.5; hit.userData.idx = i;
+    g.add(hit); isHits.push(hit);
+    g.userData = { knob, ring, post, idx: i };
+    isGroup.add(g);
+  });
+  isGroup.visible = false;
+}
+buildIssueMarkers();
+
+function money(n) { return n ? "$" + n.toLocaleString() : "free"; }
+
+/* Furniture does not "exclude the walking adult" -- it costs everybody
+   floor, which is a different sentence. Blockages that stop a body
+   outright get the exclusion wording; the rest get the recovery
+   wording. */
+function who(it) {
+  const names = (it.excludes || [])
+    .map(n => (P[n] && P[n].label) || n);
+  if (!names.length) return "no body stopped here today";
+  if (it.verdict === "move" || it.verdict === "reconfigure") {
+    return `returns floor to ${names.length === D.profiles.length
+      ? "every body" : names.join(", ")}`;
+  }
+  return "excludes " + names.filter(n => n !== "Walking adult").join(", ");
+}
+
+function renderIssueList() {
+  const shown = ISSUES.map((it, i) => ({ it, i })).filter(({ it }) =>
+    isFilter === "all" ? true
+      : isFilter === "move" ? it.cost === 0
+      : isFilter === "combined" ? it.verdict === "combined"
+      : it.cost > 0 && it.verdict !== "combined");
+  const paid = ISSUES.filter(i => i.cost > 0);
+  const free = ISSUES.filter(i => i.cost === 0);
+  el("istotal").textContent =
+    "$" + paid.reduce((a, c) => a + c.cost, 0).toLocaleString();
+  el("issub").textContent =
+    `${ISSUES.length} issues · ${free.length} cost nothing` +
+    (ISSUES[0] && ISSUES[0].minor_folded
+      ? ` · ${ISSUES[0].minor_folded} minor folded` : "");
+  el("islist").innerHTML = shown.map(({ it, i }) => `
+    <li><button data-i="${i}" class="${isSel === i ? "sel" : ""}">
+      <span class="r1">
+        <em class="v-${it.verdict}">${VLABEL[it.verdict] || it.verdict}</em>
+        <strong>${money(it.cost)}</strong>
+      </span>
+      <span class="r2">${it.detail}</span>
+      <span class="r3">${it.room ? it.room + " · " : ""}${who(it)}</span>
+    </button></li>`).join("");
+  el("islist").querySelectorAll("button").forEach(b =>
+    b.addEventListener("click", () => selectIssue(Number(b.dataset.i))));
+}
+
+function selectIssue(i) {
+  isSel = i;
+  const it = ISSUES[i];
+  // Fly to it: an oblique three-quarter view close enough to read the
+  // room, which is more use than dropping the camera on its head.
+  lookAt(it.pos[0] - 7, it.pos[1] - 7, 6.5,
+         it.pos[0], it.pos[1], 0.9);
+  userCam = false;
+  isGroup.children.forEach(g => {
+    const on = g.userData.idx === i;
+    g.userData.knob.scale.setScalar(on ? 1.7 : 1);
+    g.userData.ring.material.opacity = on ? 1 : 0.35;
+    g.userData.post.material.opacity = on ? 0.8 : 0.18;
+  });
+  showChokepoint({ ...it, verdict: it.verdict });
+  renderIssueList();
+}
+
+function setInspect(on) {
+  inspecting = on;
+  playing = !on;
+  el("inspect").setAttribute("aria-pressed", String(on));
+  el("inspect").textContent = on ? "Back to walkthrough" : "Inspect issues";
+  el("ispanel").hidden = !on;
+  el("play").disabled = on;
+  isGroup.visible = on;
+  if (on) {
+    hideAgents(); clearMarkers(); hideChokepoint();
+    decalGroup.visible = false; cpGroup.visible = false;
+    roomGroup.visible = false; surfGroup.visible = false;
+    el("cpsum").hidden = true; el("widthcard").hidden = true;
+    setWallCut(0.16);
+    roomLabels.visible = true;
+    isSel = null;
+    buildIssueMarkers();
+    isGroup.visible = true;
+    renderIssueList();
+    lookAt(BW / 2, -8, 36, BW / 2, BH / 2, 0);
+    const paid = ISSUES.filter(i => i.cost > 0);
+    el("kicker").textContent = "Inspect";
+    el("caption").innerHTML =
+      `Every issue the analysis found, with what fixes it. ` +
+      `<em>Click a row or a marker.</em> ` +
+      `${ISSUES.length - paid.length} cost nothing — they are furniture. ` +
+      `The rest total $${paid.reduce((a, c) => a + c.cost, 0)
+        .toLocaleString()} of building work.`;
+    el("sceneno").textContent = "AUDIT";
+    el("statn").textContent = String(ISSUES.length);
+    el("statl").textContent = "issues found";
+    el("bar").style.width = "100%";
+    el("live").textContent =
+      `Inspect mode. ${ISSUES.length} issues listed.`;
+  } else {
+    hideChokepoint();
+    goto(sceneI);
+  }
+}
 
 /* ---------- scene script ---------- */
 const P = {};
@@ -1331,6 +1493,7 @@ function stepWalks(sc, t, dt) {
 /* ---------- HUD ---------- */
 const el = id => document.getElementById(id);
 function applyScene(i) {
+  if (inspecting) return;    // inspect owns the HUD while it is open
   const s = SCENES[i];
   window.__AT3 = Object.assign(window.__AT3 || {},
     { SCENES, P, sceneI: i, D });
@@ -1424,7 +1587,7 @@ function frame(ts) {
   } else if (slowFrames > 0) { slowFrames--; }
 
   const s = SCENES[sceneI];
-  if (playing) {
+  if (playing && !inspecting) {
     sceneT += dt;
     // A throw inside a scene tick used to strand the whole walkthrough on
     // one scene: rAF was already re-armed, so the loop survived but never
@@ -1449,6 +1612,14 @@ function frame(ts) {
 
   if (routeMat && routeMat.map) routeMat.map.offset.x -= dt * 0.42;
 
+  if (inspecting && !REDUCED) {
+    isGroup.children.forEach(g => {
+      if (g.userData.idx === isSel) {
+        g.userData.knob.position.y = 2.15 + Math.sin(clock * 3.2) * 0.09;
+      }
+    });
+  }
+
   markers.children.forEach(m => {
     const age = clock - m.userData.born;
     const p = m.userData.pulse;
@@ -1472,6 +1643,14 @@ el("play").addEventListener("click", () => {
   el("play").textContent = playing ? "Pause" : "Play";
 });
 el("restart").addEventListener("click", () => goto(0));
+el("inspect").addEventListener("click", () => setInspect(!inspecting));
+el("ispanel").querySelectorAll(".isfilters button").forEach(b =>
+  b.addEventListener("click", () => {
+    isFilter = b.dataset.f;
+    el("ispanel").querySelectorAll(".isfilters button")
+      .forEach(x => x.classList.toggle("on", x === b));
+    renderIssueList();
+  }));
 el("cpclose").addEventListener("click", hideChokepoint);
 el("widthslider").addEventListener("input", e => {
   sliderTouched = true;
@@ -1484,7 +1663,9 @@ addEventListener("keydown", e => {
   if (e.key === "ArrowRight") { e.preventDefault(); goto(sceneI + 1); }
   if (e.key === "ArrowLeft") { e.preventDefault(); goto(sceneI - 1); }
   if (e.key.toLowerCase() === "p") { el("play").click(); }
-  if (e.key === "Escape") hideChokepoint();
+  if (e.key === "Escape") { hideChokepoint(); if (inspecting) setInspect(false); }
+  if (e.key.toLowerCase() === "i") { e.preventDefault(); setInspect(!inspecting); }
+  if (inspecting) return;
   // Number keys jump straight to a scene. Three minutes is longer than
   // most demo slots, and hunting with the arrow keys on stage is worse
   // than not showing the scene at all.
