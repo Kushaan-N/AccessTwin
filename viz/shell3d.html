@@ -170,6 +170,14 @@ button.prim[aria-pressed="true"]{background:var(--accent);
 .isfilters{display:flex;gap:5px}
 .isfilters button{padding:3px 8px;font-size:10.5px}
 .isfilters button.on{border-color:var(--accent);color:var(--accent)}
+.ispop{margin:0;font-size:11.5px;color:var(--ink-2);line-height:1.4;
+  border-left:2px solid var(--bad);padding-left:8px}
+.ispop b{color:var(--ink);font-family:var(--mono)}
+.isphase{position:sticky;top:0;background:var(--panel);
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--ink-3);padding:5px 13px;
+  border-bottom:1px solid var(--rule);border-top:1px solid var(--rule)}
+.isphase span{float:right;color:var(--ink-2)}
 .islist{list-style:none;margin:0;padding:0;overflow-y:auto;flex:1}
 .islist li{border-bottom:1px solid var(--rule-soft)}
 .islist button{width:100%;text-align:left;background:none;border:0;
@@ -271,11 +279,13 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--panel);
             <b id="istotal"></b>
             <span id="issub"></span>
           </div>
+          <p id="ispop" class="ispop"></p>
           <div class="isfilters" role="group" aria-label="Filter issues">
             <button data-f="all" class="on">All</button>
             <button data-f="move">Free</button>
             <button data-f="build">Build</button>
             <button data-f="combined">Combined</button>
+            <button id="iscopy" title="Copy the worklist as CSV">Copy</button>
           </div>
         </div>
         <ul id="islist" class="islist"></ul>
