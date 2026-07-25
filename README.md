@@ -9,7 +9,11 @@ then localises each barrier, prices the repairs, and scores itself against a
 planted answer key it is never shown.
 
 **Live demo:** https://claude.ai/code/artifact/131f14af-2e9c-4bf4-99b3-79452a60593a
-It starts automatically, loops, and needs no input.
+
+It opens on the **audit** — every issue, what fixes it, and what that costs —
+because that is the output. The three-minute walkthrough behind it is the
+evidence: four bodies driven through the building, and everywhere one of them
+stopped. Append `#walkthrough` to the link to open there instead.
 
 ---
 
@@ -79,10 +83,11 @@ restarts, `←`/`→` step scenes, `P` pauses, `Esc` closes a panel. Two scenes 
 interactive: drag the body-width slider in *Where does it close?*, and click any
 marker in *Every blockage, priced*.
 
-**Inspect issues** (button, or `I`) leaves the walkthrough entirely and gives you
-the worklist: every finding at once, free camera, a filterable list, and a
-clickable marker on each. Selecting one flies the camera to it and shows what
-fixes it and what that costs. `Esc` returns.
+**The audit** is where the page opens. Every finding at once, free camera, a
+filterable list grouped by what it takes to action — *today at no cost*, *minor
+works*, *capital works* — and a clickable marker on each. Selecting one flies the
+camera to it and shows the remedy and the price. Arrow keys step the list;
+`Copy` exports it as CSV. `I` or `Esc` toggles back to the walkthrough.
 
 It is also usable without the 3D view: there is a skip link to a text version of
 every finding, each scene is announced to a live region, and
