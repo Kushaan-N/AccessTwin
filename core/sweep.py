@@ -116,6 +116,29 @@ def sweep(grid: NavGrid, free, cell, rooms=None, spawn=None,
                                     float(grid.headroom[yx] * IN_PER_M), 1),
                                 threshold_in=p.head_clearance_in))
 
+    # -- floor finish.
+    # A corridor can be wide, level and compliant on every dimension and
+    # still be impassable because of what was laid on it.
+    if grid.surface is not None and grid.surface_order:
+        from schema import SURFACES, surface_ok
+        for p in ALL_PROFILES:
+            bad = ~grid.surface_mask(p) & free
+            for m in _clusters(bad, MIN_AREA * 2):
+                ys, xs = np.nonzero(m)
+                sid = int(np.bincount(grid.surface[ys, xs]).argmax())
+                surf = SURFACES[grid.surface_order[sid]]
+                ok, why = surface_ok(p, surf)
+                cy, cx = ys.mean(), xs.mean()
+                k = int(np.argmin((ys - cy) ** 2 + (xs - cx) ** 2))
+                out.append(dict(type="floor_surface", agent=p.name,
+                                pos=[round(float(ys[k]) * cell, 2),
+                                     round(float(xs[k]) * cell, 2)],
+                                bbox=_bbox(m, cell),
+                                surface=surf.name, surface_label=surf.label,
+                                reason=why,
+                                area_m2=round(float(m.sum()) * cell ** 2, 1),
+                                measured_in=0.0, threshold_in=0.0))
+
     # -- counter and service heights.
     # Not every access failure is a matter of getting there. A counter at
     # till height is reachable, unusable, and invisible to any amount of
