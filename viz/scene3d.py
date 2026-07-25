@@ -214,12 +214,19 @@ def main():
                      seed=args.seed, pop_n=args.pop, ceiling=ceil_z,
                      surface=surf, surface_order=SURFACE_ORDER)
     fixed_free, fixed_height = opt.pop("_final_world")
+    fixed_free = np.asarray(fixed_free)
     after = NavGrid(fixed_free, fixed_height, cell, ceiling=ceil_z,
                     surface=surf, surface_order=SURFACE_ORDER)
     after_base = after.analyse(BASELINE, spawn)["reachable_m2"] or 1.0
     for pr in profiles:
         p = next(q for q in ALL_PROFILES if q.name == pr["name"])
         a = after.analyse(p, spawn)
+        # The route through the remediated building. Without this the
+        # viewer can show a fix landing but not the journey it creates,
+        # which is the only part that proves anything.
+        pr["after_journeys"] = {
+            g: walk(after, p, spawn, c, fixed_height, cell)
+            for g, c in goals.items()}
         pr["after_pct"] = round(100 * a["reachable_m2"] / after_base, 1)
         pr["after_reach_grid"] = encode_mask(a["reachable"])
         pr["after_goals"] = {g: bool(after.reaches(p, spawn, c))
@@ -250,7 +257,7 @@ def main():
         "surface_grid": encode_surface(surf),
         "chokepoints": chokes,
         "issues": audit_issues(w, grid, free, cell, chokes, profiles,
-                               seed=args.seed),
+                               opt, seed=args.seed),
     })
 
     os.makedirs(os.path.join(ROOT, "out"), exist_ok=True)
@@ -470,7 +477,7 @@ REMEDY = {
 }
 
 
-def audit_issues(w, grid, free, cell, chokes, profiles, seed=7,
+def audit_issues(w, grid, free, cell, chokes, profiles, opt, seed=7,
                  cap=30):
     """One worklist: every finding, what fixes it, and what that costs.
 
@@ -592,6 +599,19 @@ def audit_issues(w, grid, free, cell, chokes, profiles, seed=7,
             "chosen": False, "area_m2": area,
             "title": "Excludes without disconnecting",
         })
+
+    # Cost per square metre returned. A worklist sorted by price answers
+    # "what is cheapest"; sorted by this it answers "what is worth
+    # doing", which is a different and better question.
+    stand = {d["id"]: d for d in (opt.get("standalone_scores") or [])}
+    for it in issues:
+        m2 = it.get("area_m2") or 0.0
+        sc = stand.get(it["id"])
+        if sc and sc.get("profile_m2"):
+            m2 = max(m2, max(sc["profile_m2"].values()))
+        it["recovered_m2"] = round(m2, 1)
+        it["cost_per_m2"] = (round(it["cost"] / m2) if it["cost"] and m2 > 0.2
+                             else (0 if not it["cost"] else None))
 
     order = {"move": 0, "reconfigure": 1, "combined": 2, "build": 3}
     issues.sort(key=lambda d: (order.get(d["verdict"], 9),
