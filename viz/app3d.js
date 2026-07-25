@@ -669,10 +669,11 @@ const SPEED = { walker: 1.35, wheelchair: 1.05, cane: 0.85, robot: 1.0 };
    reads as "it barely moved". Speed is scaled so the whole journey
    completes with time to spare, and the ratio between profiles is
    preserved so the wheelchair still visibly trails the walker. */
-function paceFor(profile, lengthM, dur) {
+function paceFor(profile, lengthM, dur, delay) {
   const base = SPEED[profile.body] || 1.2;
-  const needed = lengthM / Math.max(dur * 0.68, 1);
-  return Math.max(base, Math.min(needed, base * 4.5));
+  const window = Math.max((dur - (delay || 0)) * 0.68, 1);
+  const needed = lengthM / window;
+  return Math.max(base, Math.min(needed, base * 5.5));
 }
 
 function placeAgent(profile, sample, t) {
@@ -907,8 +908,14 @@ function showChokepoint(c) {
   const r = stage.getBoundingClientRect();
   const x = (p.x * 0.5 + 0.5) * r.width;
   const y = (-p.y * 0.5 + 0.5) * r.height;
-  pop.style.left = Math.max(8, Math.min(r.width - 300, x + 16)) + "px";
-  pop.style.top = Math.max(8, Math.min(r.height - 210, y - 40)) + "px";
+  // The audit panel occupies the right-hand 340px while inspecting, so
+  // the usable width shrinks and a marker over there would otherwise
+  // put the panel underneath it.
+  const rightEdge = r.width - (inspecting ? 356 : 8) - 292;
+  let left = x + 16;
+  if (left > rightEdge) left = x - 308;
+  pop.style.left = Math.max(8, Math.min(rightEdge, left)) + "px";
+  pop.style.top = Math.max(8, Math.min(r.height - 220, y - 40)) + "px";
   pop.focus();
 }
 
@@ -1170,10 +1177,18 @@ function journeyOf(pname, goal) { return P[pname].journeys[goal]; }
 const SCENES = [
   {
     id: "establish", dur: 9.0, kicker: "The building",
-    cap: `A generated civic centre — lobby, café, spine corridor, community
-          room, accessible WC and a raised gallery. It is drawn to code.
-          <em>Eight access defects are planted in it</em>, and every one of them
-          is a condition that passes a plan check.`,
+    cap: () => {
+      // Built from the data. Hard-coding the room list and the defect
+      // count meant the opening line still said "eight defects" and
+      // listed rooms from a building two revisions old.
+      const names = (D.rooms || []).map(r => r.name)
+        .filter(n => n && n !== "Corridor");
+      const last = names.pop();
+      return `A generated civic centre — ${names.join(", ")} and a
+        ${last.toLowerCase()}. It is drawn to code.
+        <em>${REC.planted} access defects are planted in it</em>, and every
+        one is a condition that passes a plan check.`;
+    },
     stat: () => [String(REC.planted), "planted defects"],
     enter() {
       setWallCut(1.0); decalGroup.visible = false; hideAgents();
@@ -1463,7 +1478,7 @@ function hideAgents() { D.profiles.forEach(p => p.agent.visible = false); }
    looking where it is going -- so the doorway that stops the chair
    arrives at the viewer the way it arrives at the person. */
 function eyeLevel(pname, back) {
-  const p = P[pname], st = p._walkState;
+  const p = P[pname], st = p._active;
   if (!st || !st.sample) return;
   const s = st.sample;
   const eye = (p.agent.userData.parts.eyeH || 1.5);
@@ -1479,7 +1494,7 @@ function eyeLevel(pname, back) {
 function follow(pname, t, back, side, up) {
   back *= 0.62; side *= 0.62; up *= 0.72;
   const p = P[pname];
-  const st = p._walkState;
+  const st = p._active;
   if (!st || !st.sample) return;
   const s = st.sample;
   const dx = s.dir[0], dy = s.dir[1];
@@ -1489,14 +1504,18 @@ function follow(pname, t, back, side, up) {
 
 /* ---------- walking engine ---------- */
 function resetWalks(sc) {
-  D.profiles.forEach(p => { p._walkState = null; });
+  // Keyed by goal, not one slot per profile. A scene that sends the same
+  // body to two destinations used to overwrite the first journey with
+  // the second, so the agent stood still until the second one's delay
+  // elapsed and then completed part of one route.
+  D.profiles.forEach(p => { p._walks = {}; p._active = null; });
   clearRoute();
   if (!sc.walk) return;
   sc.walk.forEach(([pname, goal, delay]) => {
     const p = P[pname], j = p.journeys[goal];
-    p._walkState = {
-      goal, delay, j, len: pathLength(j.path), s: 0,
-      done: false, stopped: false, sample: null
+    p._walks[goal] = {
+      goal, delay: delay || 0, j, len: pathLength(j.path), s: 0,
+      done: false, drawn: false, sample: null
     };
   });
 }
@@ -1504,11 +1523,11 @@ function resetWalks(sc) {
 function stepWalks(sc, t, dt) {
   if (!sc.walk) return;
   sc.walk.forEach(([pname, goal, delay]) => {
-    const p = P[pname], st = p._walkState;
-    if (!st || st.goal !== goal) return;
-    if (t < delay) { p.agent.visible = false; return; }
+    const p = P[pname], st = p._walks && p._walks[goal];
+    if (!st) return;
+    if (t < st.delay) { if (!p._active) p.agent.visible = false; return; }
     if (!st.drawn) { st.drawn = true; drawRoute(st.j.path, p.c, st.j.arrived); }
-    const sp = paceFor(p, st.len, SCENES[sceneI].dur);
+    const sp = paceFor(p, st.len, SCENES[sceneI].dur, st.delay);
     if (!st.done) st.s += dt * sp;
     if (st.s >= st.len) {
       st.s = st.len;
@@ -1532,19 +1551,36 @@ function stepWalks(sc, t, dt) {
       sample.moving = false;
     }
     st.sample = sample;
+    p._active = st;
     placeAgent(p, sample, t);
   });
 }
 
 /* ---------- HUD ---------- */
 const el = id => document.getElementById(id);
+let capFadeT = null;
+function fadeCaption(write) {
+  // A hard text swap mid-shot reads as a glitch; a short crossfade reads
+  // as a cut. Respect reduced motion by just writing.
+  const k = el("kicker"), c = el("caption");
+  if (REDUCED || !k || !c) { write(); return; }
+  k.style.opacity = c.style.opacity = "0";
+  clearTimeout(capFadeT);
+  capFadeT = setTimeout(() => {
+    write();
+    k.style.opacity = c.style.opacity = "1";
+  }, 180);
+}
+
 function applyScene(i) {
   if (inspecting) return;    // inspect owns the HUD while it is open
   const s = SCENES[i];
   window.__AT3 = Object.assign(window.__AT3 || {},
     { SCENES, P, sceneI: i, D });
-  el("kicker").textContent = s.kicker;
-  el("caption").innerHTML = typeof s.cap === "function" ? s.cap() : s.cap;
+  fadeCaption(() => {
+    el("kicker").textContent = s.kicker;
+    el("caption").innerHTML = typeof s.cap === "function" ? s.cap() : s.cap;
+  });
   el("sceneno").textContent =
     String(i + 1).padStart(2, "0") + " / " + String(SCENES.length).padStart(2, "0");
   const st = s.stat ? s.stat() : ["", ""];
@@ -1822,6 +1858,11 @@ el("meta").textContent =
 
 resize();
 goto(0);
+// Open on the worklist, not the film. The walkthrough answers "how do
+// you know"; the audit is the thing somebody came for, and a judge who
+// only looks for ten seconds should land on findings rather than on an
+// establishing shot.
+setInspect(true);
 // One synchronous draw before the spinner goes, so the first thing the
 // viewer sees is the building rather than a flash of empty stage.
 renderer.render(scene, camera);
