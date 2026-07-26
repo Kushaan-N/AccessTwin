@@ -1,0 +1,558 @@
+<style>
+/* ============================================================
+   Access-Twin — 3D walkthrough chrome.
+   The viewport is the work; the chrome is a drawing title block
+   wrapped around it. Annotation voice is monospace throughout.
+   ============================================================ */
+:root {
+  color-scheme: light dark;
+
+  --ground:#EDF1F3; --sheet:#FFFFFF; --panel:#E3E9EC;
+  --rule:#C3CFD5; --rule-soft:#D6DFE3;
+  --ink:#10181D; --ink-2:#48606D; --ink-3:#6E858F;
+  --accent:#00897B; --ok:#0F7B63; --warn:#8A6410; --bad:#A32F44;
+
+  --stage-bg:#DCE4E8; --stage-fog:#DCE4E8;
+  --m-floor:#E8EAEA; --m-wall:#F3F5F6; --m-glass:#BBD5DE;
+  --m-ramp:#D8C69A; --m-concrete:#C2C7C9; --m-timber:#C8A97E;
+  --m-fabric:#9FB0BC; --m-porcelain:#FAFBFC; --m-steel:#9AA6AE;
+  --m-soffit:#DDE2E5; --m-gallery:#D3D9DC; --m-parapet:#E6E9EA;
+
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground:#0E1216; --sheet:#131A20; --panel:#172029;
+    --rule:#2A3742; --rule-soft:#1F2A33;
+    --ink:#E4ECF1; --ink-2:#93A4B1; --ink-3:#6B7D8A;
+    --accent:#29A090; --ok:#29A090; --warn:#BE8A30; --bad:#D0475E;
+
+    --stage-bg:#080B0E; --stage-fog:#0C1116;
+    --m-floor:#5A656F; --m-wall:#78858F; --m-glass:#5E93A6;
+    --m-ramp:#8A7A55; --m-concrete:#6E7A84; --m-timber:#9A7746;
+    --m-fabric:#5A6B78; --m-porcelain:#D6DEE4; --m-steel:#98A5AE;
+    --m-soffit:#616D77; --m-gallery:#6B7681; --m-parapet:#7E8B95;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0E1216;--sheet:#131A20;--panel:#172029;--rule:#2A3742;--rule-soft:#1F2A33;
+  --ink:#E4ECF1;--ink-2:#93A4B1;--ink-3:#6B7D8A;
+  --accent:#29A090;--ok:#29A090;--warn:#BE8A30;--bad:#D0475E;
+  --stage-bg:#080B0E;--stage-fog:#0C1116;
+  --m-floor:#5A656F;--m-wall:#78858F;--m-glass:#5E93A6;--m-ramp:#8A7A55;
+  --m-concrete:#6E7A84;--m-timber:#9A7746;--m-fabric:#5A6B78;
+  --m-porcelain:#D6DEE4;--m-steel:#98A5AE;--m-soffit:#616D77;
+  --m-gallery:#6B7681;--m-parapet:#7E8B95;
+}
+:root[data-theme="light"]{
+  --ground:#EDF1F3;--sheet:#FFFFFF;--panel:#E3E9EC;--rule:#C3CFD5;--rule-soft:#D6DFE3;
+  --ink:#10181D;--ink-2:#48606D;--ink-3:#6E858F;
+  --accent:#00897B;--ok:#0F7B63;--warn:#8A6410;--bad:#A32F44;
+  --stage-bg:#DCE4E8;--stage-fog:#DCE4E8;
+  --m-floor:#E8EAEA;--m-wall:#F3F5F6;--m-glass:#BBD5DE;--m-ramp:#C9CFD2;
+  --m-concrete:#C2C7C9;--m-timber:#C8A97E;--m-fabric:#9FB0BC;
+  --m-porcelain:#FAFBFC;--m-steel:#9AA6AE;--m-soffit:#DDE2E5;
+  --m-gallery:#D3D9DC;--m-parapet:#E6E9EA;
+}
+*{box-sizing:border-box}
+.sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+  overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.skip{position:absolute;left:-9999px;top:0;z-index:20;background:var(--sheet);
+  color:var(--ink);padding:9px 14px;border:1px solid var(--accent);
+  border-radius:0 0 4px 0;font-size:13px}
+.skip:focus{left:0}
+.tx{border:1px solid var(--rule);border-radius:3px;background:var(--sheet);
+  padding:9px 12px;font-size:13px}
+.tx summary{cursor:pointer;font-family:var(--mono);font-size:11px;
+  letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+.tx summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.tx h5{margin:12px 0 4px;font-size:13px}
+.tx ul{margin:4px 0 0;padding-left:18px;color:var(--ink-2)}
+.tx li{margin:2px 0}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#stage:focus-visible{outline-offset:-3px}
+
+/* A demo about exclusion that ignores a stated access preference would
+   be making its own point against itself. */
+@media (prefers-reduced-motion: reduce) {
+  .at-bar i, .progress i { transition: none !important; }
+}
+
+.at{
+  background:var(--ground); color:var(--ink); font-family:var(--sans);
+  height:100vh; height:100dvh; overflow:auto;
+  display:flex; flex-direction:column;
+  padding:clamp(10px,1.6vw,20px); gap:11px; font-size:15px; line-height:1.5;
+}
+.head{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 18px;
+  border-bottom:1px solid var(--rule);padding-bottom:10px}
+.head h1{font-family:var(--mono);font-size:clamp(16px,2.1vw,21px);
+  font-weight:600;letter-spacing:-.02em;margin:0}
+.head h1 span{color:var(--accent)}
+.head p{margin:0;color:var(--ink-2);font-size:13px;max-width:60ch}
+#meta{margin-left:auto;font-family:var(--mono);font-size:10.5px;
+  color:var(--ink-3);letter-spacing:.05em;text-transform:uppercase;
+  white-space:nowrap}
+
+.body{display:grid;grid-template-columns:minmax(0,1fr) 268px;gap:11px;
+  align-items:stretch;flex:1;min-height:0}
+@media(max-width:920px){.body{grid-template-columns:minmax(0,1fr)}}
+
+.viewport{position:relative;background:var(--stage-bg);border:1px solid var(--rule);
+  border-radius:3px;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+#stage{flex:1;min-height:300px;cursor:grab;touch-action:none}
+#stage:active{cursor:grabbing}
+#stage canvas{display:block;width:100%;height:100%}
+
+.progress{height:2px;background:var(--rule-soft);flex:none}
+.progress i{display:block;height:100%;background:var(--accent);width:0}
+
+.block{border-top:1px solid var(--rule);background:var(--panel);
+  padding:10px 13px;display:flex;gap:13px;align-items:flex-start;min-height:86px;
+  flex:none}
+.block .no{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;
+  color:var(--ink-3);border-right:1px solid var(--rule);padding-right:13px;
+  white-space:nowrap;padding-top:2px}
+.block .fade{transition:opacity .22s ease}
+@media (prefers-reduced-motion: reduce){.block .fade{transition:none}}
+.block h2{font-family:var(--mono);font-size:11.5px;font-weight:600;
+  letter-spacing:.09em;text-transform:uppercase;margin:0 0 3px;color:var(--accent)}
+.block p{margin:0;font-size:14.5px;line-height:1.45;max-width:78ch;
+  text-wrap:balance}
+.block em{font-style:normal;font-weight:600;color:var(--ink)}
+
+.rail{display:flex;flex-direction:column;gap:9px;min-height:0;
+  overflow-y:auto;scrollbar-width:thin;
+  scrollbar-color:var(--rule) transparent}
+.rail::-webkit-scrollbar{width:6px}
+.rail::-webkit-scrollbar-thumb{background:var(--rule);border-radius:3px}
+.rail::-webkit-scrollbar-track{background:transparent}
+.card{background:var(--sheet);border:1px solid var(--rule);border-radius:3px;
+  padding:10px 11px}
+.card h3{font-family:var(--mono);font-size:10px;font-weight:600;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3);margin:0 0 8px}
+.stat .n{font-family:var(--mono);font-size:27px;font-weight:600;
+  letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.05;
+  display:block}
+.stat .l{font-size:12px;color:var(--ink-2)}
+#chips{display:flex;flex-direction:column;gap:6px}
+.chip{display:flex;align-items:center;gap:7px;font-size:12.5px;
+  color:var(--ink-3);padding:3px 6px;border-radius:3px;
+  border:1px solid transparent}
+.chip i{width:9px;height:9px;border-radius:2px;flex:none}
+.chip b{margin-left:auto;font-family:var(--mono);font-size:12px;
+  font-variant-numeric:tabular-nums;font-weight:600}
+.chip.on{color:var(--ink);background:var(--panel);border-color:var(--rule)}
+
+.boot{position:absolute;inset:0;display:flex;align-items:center;
+  justify-content:center;gap:10px;background:var(--stage-bg);z-index:8;
+  font-family:var(--mono);font-size:12px;color:var(--ink-3);
+  letter-spacing:.06em}
+.boot span{width:11px;height:11px;border:2px solid var(--rule);
+  border-top-color:var(--accent);border-radius:50%;
+  animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.boot span{animation:none}}
+.boot[hidden]{display:none}
+/* Left-aligned on purpose: centred, the card covered the building it is
+   introducing, and a dialog over a dark rectangle reads as a page that
+   failed to load. Card left, hero right. */
+.intro{position:absolute;inset:0;z-index:10;display:flex;
+  align-items:center;justify-content:flex-start;
+  padding:22px 22px 22px 30px;overflow:auto;
+  background:radial-gradient(135% 105% at 46% 47%,
+    transparent 0%,
+    color-mix(in srgb, var(--stage-bg) 34%, transparent) 54%,
+    color-mix(in srgb, var(--stage-bg) 82%, transparent) 100%)}
+.intro[hidden]{display:none}
+.introcard{background:color-mix(in srgb, var(--sheet) 96%, transparent);
+  border:1px solid var(--rule);border-top:2px solid var(--accent);
+  border-radius:6px;padding:22px 26px 20px;max-width:496px;
+  box-shadow:0 24px 64px rgba(0,0,0,.5)}
+.introcard .eyebrow{display:flex;align-items:center;gap:7px;margin:0 0 12px;
+  font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-3)}
+.introcard .eyebrow i{width:6px;height:6px;border-radius:50%;
+  background:var(--accent);flex:none}
+.introcard h3{margin:0 0 11px;font-size:22px;line-height:1.22;
+  letter-spacing:-.015em;text-wrap:balance;font-weight:600}
+.introcard h3 em{font-style:normal;color:var(--accent)}
+.introcard p{margin:0 0 16px;font-size:13.5px;color:var(--ink-2);
+  line-height:1.55}
+.introstats{list-style:none;display:flex;gap:10px;margin:0 0 18px;padding:13px 0;
+  border-top:1px solid var(--rule-soft);
+  border-bottom:1px solid var(--rule-soft)}
+.introstats li{flex:1;min-width:0}
+.introstats b{display:block;font-family:var(--mono);font-size:19px;
+  font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;
+  line-height:1.1;color:var(--ink)}
+.introstats span{display:block;margin-top:3px;font-size:10.5px;
+  line-height:1.35;color:var(--ink-3)}
+.introbtns{display:flex;gap:9px;flex-wrap:wrap;align-items:stretch}
+.introbtns button{font-size:12.5px;padding:9px 15px;border-radius:4px}
+.introbtns button em{font-style:normal;color:var(--ink-3);margin-left:5px;
+  font-size:11px}
+.introbtns .prim{background:var(--accent);color:var(--stage-bg);
+  border-color:var(--accent);font-weight:600}
+.introbtns .prim:hover{filter:brightness(1.1);color:var(--stage-bg)}
+.introhint{margin:14px 0 0 !important;font-family:var(--mono);
+  font-size:10px;color:var(--ink-3);letter-spacing:.05em}
+/* Below this the stage is too narrow to hold a building beside the card. */
+@media(max-width:900px){.intro{justify-content:center;padding:22px}}
+@media(max-width:560px){.introstats{flex-wrap:wrap}}
+.nogl{position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:8px;padding:24px;
+  text-align:center;background:var(--stage-bg);z-index:9}
+.nogl[hidden]{display:none}
+.nogl h3{margin:0;font-size:15px}
+.nogl p{margin:0;font-size:13px;color:var(--ink-2);max-width:44ch}
+
+button.prim{border-color:var(--accent);color:var(--accent)}
+button.prim[aria-pressed="true"]{background:var(--accent);
+  color:var(--stage-bg);border-color:var(--accent)}
+
+.ispanel{position:absolute;right:0;top:0;bottom:0;width:340px;z-index:7;
+  background:var(--sheet);border-left:1px solid var(--rule);
+  display:flex;flex-direction:column}
+.ispanel[hidden]{display:none}
+.ishead{padding:12px 14px 10px;border-bottom:1px solid var(--rule);
+  display:flex;flex-direction:column;gap:9px}
+.ishead b{font-family:var(--mono);font-size:19px;display:block;
+  font-variant-numeric:tabular-nums}
+.ishead span{font-size:12px;color:var(--ink-2)}
+.isfilters{display:flex;gap:5px}
+.isfilters button{padding:3px 8px;font-size:10.5px}
+.isfilters button.on{border-color:var(--accent);color:var(--accent)}
+.ispop{margin:0;font-size:11.5px;color:var(--ink-2);line-height:1.4;
+  border-left:2px solid var(--bad);padding-left:8px}
+.ispop b{color:var(--ink);font-family:var(--mono)}
+.isphase{position:sticky;top:0;background:var(--panel);
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--ink-3);padding:5px 13px;
+  border-bottom:1px solid var(--rule);border-top:1px solid var(--rule)}
+.isphase span{float:right;color:var(--ink-2)}
+.islist{list-style:none;margin:0;padding:0;overflow-y:auto;flex:1}
+.islist li{border-bottom:1px solid var(--rule-soft)}
+.isempty{padding:22px 14px;font-size:12.5px;color:var(--ink-3);
+  text-align:center;border:0}
+.islist button{width:100%;text-align:left;background:none;border:0;
+  border-left:3px solid transparent;border-radius:0;padding:9px 13px;
+  cursor:pointer;font-family:var(--sans);font-size:12.5px;color:var(--ink)}
+.islist button:hover{background:var(--panel)}
+.islist button.sel{background:var(--panel);border-left-color:var(--accent)}
+.islist .r1{display:flex;justify-content:space-between;gap:10px;
+  align-items:baseline}
+.islist .r1 em{font-style:normal;font-family:var(--mono);font-size:11px;
+  letter-spacing:.06em;text-transform:uppercase}
+.islist .r1 .roi{font-style:normal;color:var(--ink-3);font-size:10.5px;
+  margin-left:5px}
+.islist .r1 strong{font-family:var(--mono);font-size:12px;
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+.islist .r2{color:var(--ink-2);margin-top:3px;line-height:1.35}
+.islist .r3{color:var(--ink-3);font-size:11px;margin-top:3px}
+.v-move{color:var(--ok)} .v-reconfigure{color:var(--warn)}
+.v-build{color:var(--bad)} .v-combined{color:var(--bad)}
+@media(max-width:900px){.ispanel{width:100%}}
+
+/* A visible way forward. Somebody in a hurry should not have to find a
+   12px arrow in the footer or guess that the keyboard does anything. */
+.nav{position:absolute;top:50%;transform:translateY(-50%);z-index:5;
+  width:44px;height:76px;padding:0;display:flex;align-items:center;
+  justify-content:center;gap:6px;border-radius:4px;
+  background:color-mix(in srgb, var(--sheet) 72%, transparent);
+  border:1px solid var(--rule);color:var(--ink-2);
+  transition:opacity .18s ease, color .18s ease, width .18s ease;
+  opacity:.5;cursor:pointer}
+.nav span{font-size:26px;line-height:1;font-family:var(--sans)}
+.nav b{font-family:var(--mono);font-size:10px;letter-spacing:.08em;
+  text-transform:uppercase;white-space:nowrap;display:none}
+.nav:hover,.nav:focus-visible{opacity:1;color:var(--accent);
+  border-color:var(--accent)}
+.nav.next:hover{width:auto;padding:0 14px 0 10px}
+.nav.next:hover b{display:inline}
+.nav.prev{left:10px}
+.nav.next{right:10px}
+.ispanel:not([hidden]) ~ .nav.next{right:352px}
+@media (prefers-reduced-motion: reduce){.nav{transition:none}}
+
+/* Top-right, not bottom-anything: this is positioned against .viewport,
+   which contains the caption block as well as the canvas, so any
+   bottom offset lands on top of the text no matter which side it is on. */
+.remedy{position:absolute;right:16px;top:14px;
+  z-index:6;display:flex;align-items:center;gap:11px;max-width:44%;
+  flex-wrap:wrap;justify-content:flex-end;
+  background:color-mix(in srgb, var(--sheet) 88%, transparent);
+  border:1px solid var(--rule);border-radius:5px;padding:9px 13px}
+.remedy[hidden]{display:none}
+.remedy button{font-size:12.5px;padding:7px 13px}
+.remedy span{font-family:var(--mono);font-size:11px;color:var(--ink-2);
+  letter-spacing:.05em;text-align:right}
+.remedy.done button{border-color:var(--ok);color:var(--ok)}
+
+.budget{display:flex;align-items:center;gap:8px;font-size:11.5px;
+  color:var(--ink-2)}
+.budget label{font-family:var(--mono);font-size:10px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3)}
+.budget input{flex:1;accent-color:var(--accent);cursor:pointer}
+.budget b{font-family:var(--mono);font-size:12px;
+  font-variant-numeric:tabular-nums;min-width:62px;text-align:right}
+.budgetout{margin:0;font-size:11.5px;line-height:1.45;color:var(--ink-2);
+  border-left:2px solid var(--ok);padding-left:8px}
+.budgetout b{color:var(--ink);font-family:var(--mono)}
+.islist button.buy{background:color-mix(in srgb, var(--ok) 12%, transparent)}
+.islist button.buy .r1 em::after{content:" · funded";color:var(--ok)}
+
+.wo{position:absolute;inset:0;z-index:11;display:flex;align-items:center;
+  justify-content:center;padding:18px;
+  background:color-mix(in srgb, var(--stage-bg) 80%, transparent)}
+.wo[hidden]{display:none}
+.wocard{position:relative;background:var(--sheet);border:1px solid var(--rule);
+  border-radius:5px;padding:16px 18px;width:472px;max-height:92%;
+  overflow:auto;box-shadow:0 18px 50px rgba(0,0,0,.42)}
+.wohead{display:flex;justify-content:space-between;align-items:baseline;
+  font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+  color:var(--ink-3);border-bottom:1px solid var(--rule);padding-bottom:7px}
+.wohead b{color:var(--accent)}
+.wocard h3{margin:11px 0 10px;font-size:16px;line-height:1.3}
+#woshot{width:100%;height:auto;border:1px solid var(--rule);
+  border-radius:3px;display:block;background:var(--stage-bg)}
+.wocard dl{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;
+  margin:12px 0 0;font-size:12.5px}
+.wocard dt{color:var(--ink-3);white-space:nowrap;font-size:11.5px}
+.wocard dd{margin:0;font-family:var(--mono);font-size:12px}
+.wonote{margin:11px 0 0;font-size:10.5px;color:var(--ink-3);
+  border-top:1px solid var(--rule-soft);padding-top:8px;line-height:1.45}
+.wobtns{display:flex;gap:8px;margin-top:12px}
+
+@media print{
+  body>*{display:none !important}
+  .wo{display:block !important;position:static;background:#fff;padding:0}
+  .wocard{width:auto;border:0;box-shadow:none;color:#000;background:#fff}
+  .wocard h3,.wocard dd{color:#000}
+  .wobtns,.cpx{display:none !important}
+}
+
+.cpsum{position:absolute;left:12px;top:12px;display:flex;gap:8px;
+  flex-wrap:wrap;pointer-events:none;z-index:4}
+.cpsum[hidden]{display:none}
+.cpsum b{font-family:var(--mono);font-size:11.5px;font-weight:600;
+  background:var(--sheet);border:1px solid var(--rule);border-radius:3px;
+  padding:5px 9px;color:var(--ink)}
+.cpsum b i{font-style:normal;color:var(--ink-3);font-weight:400}
+
+.cppop{position:absolute;z-index:6;width:288px;background:var(--sheet);
+  border:1px solid var(--rule);border-radius:4px;padding:12px 13px 11px;
+  box-shadow:0 10px 30px rgba(0,0,0,.36)}
+.cppop h4{margin:5px 0 5px;font-size:14.5px;line-height:1.3}
+.cppop p{margin:0 0 8px;font-size:12.5px;color:var(--ink-2);line-height:1.45}
+.cppop .cpnote{font-size:10.5px;color:var(--ink-3);margin:8px 0 0;
+  border-top:1px solid var(--rule-soft);padding-top:7px}
+.cppop dl{margin:0;display:grid;grid-template-columns:auto 1fr;
+  gap:3px 10px;font-size:12px}
+.cppop dt{color:var(--ink-3);white-space:nowrap}
+.cppop dd{margin:0;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.cpv{font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;font-weight:600;display:inline-block;
+  padding:3px 7px;border-radius:3px}
+.cpv.move{background:rgba(41,160,144,.18);color:var(--ok)}
+.cpv.reconfigure{background:rgba(190,138,48,.18);color:var(--warn)}
+.cpv.build{background:rgba(208,71,94,.16);color:var(--bad)}
+.cpv.combined{background:rgba(208,71,94,.16);color:var(--bad)}
+.cpx{position:absolute;top:6px;right:6px;background:none;border:0;
+  font-size:17px;line-height:1;color:var(--ink-3);padding:3px 6px;cursor:pointer}
+.cpx:hover{color:var(--ink)}
+
+.legend{display:flex;flex-direction:column;gap:5px}
+.wrow{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+.wrow[hidden]{display:none}   /* display:flex would otherwise win */
+.wrow input{flex:1;accent-color:var(--accent);cursor:pointer}
+.wrow b{font-family:var(--mono);font-size:14px;font-variant-numeric:tabular-nums;
+  min-width:44px;text-align:right}
+#roomstate span{justify-content:flex-start}
+#roomstate .off{color:var(--bad)}
+#roomstate .on{color:var(--ink-2)}
+.legend span{display:flex;align-items:center;gap:7px;font-size:11.5px;
+  color:var(--ink-2)}
+.legend i{width:13px;height:9px;border-radius:2px;flex:none}
+
+.foot{display:flex;flex-wrap:wrap;gap:7px 14px;align-items:center;
+  border-top:1px solid var(--rule);padding-top:9px;font-size:12.5px;
+  color:var(--ink-2);flex:none}
+button{font-family:var(--mono);font-size:11.5px;letter-spacing:.03em;
+  background:var(--panel);color:var(--ink);border:1px solid var(--rule);
+  border-radius:3px;padding:5px 10px;cursor:pointer}
+button:hover{border-color:var(--accent);color:var(--accent)}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+kbd{font-family:var(--mono);font-size:11px;background:var(--panel);
+  border:1px solid var(--rule);border-bottom-width:2px;border-radius:3px;
+  padding:1px 5px;color:var(--ink-2)}
+.sp{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+</style>
+
+<a class="skip" href="#findings">Skip to the findings in text</a>
+<div class="at">
+  <header class="head">
+    <h1>Access&#8209;Twin<span>.</span></h1>
+    <p>An accessibility audit of a generated building, found by walking four
+      bodies through it — because passing every ADA measurement and being
+      reachable are different properties.</p>
+    <div id="meta"></div>
+  </header>
+
+  <div class="body">
+    <div class="viewport">
+      <div id="boot" class="boot"><span></span>Building the model…</div>
+      <div id="intro" class="intro" hidden role="dialog"
+           aria-labelledby="introh" aria-modal="false">
+        <div class="introcard">
+          <p class="eyebrow"><i></i>Access&#8209;Twin · accessibility audit</p>
+          <h3 id="introh">Four bodies walked this building.<br>
+            <em>Three of them got stuck.</em></h3>
+          <p>A wheelchair, a cane user, a delivery robot and a walking adult
+            were driven through a generated civic centre. Everywhere one of
+            them stopped is an issue &mdash; located, priced, and sorted by
+            whether it needs a trolley or a builder.</p>
+          <ul class="introstats">
+            <li><b id="isDefects">&mdash;</b><span></span></li>
+            <li><b id="isIssues">&mdash;</b><span></span></li>
+            <li><b id="isCost">&mdash;</b><span></span></li>
+          </ul>
+          <div class="introbtns">
+            <button id="introaudit" class="prim">See the issues &rsaquo;</button>
+            <button id="introwalk">Watch the walkthrough
+              <em id="isRuntime"></em></button>
+          </div>
+          <p class="introhint">drag to orbit · scroll to zoom ·
+            click any marker</p>
+        </div>
+      </div>
+      <div id="nogl" class="nogl" hidden>
+        <h3>This device can&rsquo;t run WebGL</h3>
+        <p>The 3D walkthrough needs hardware acceleration. Every finding
+          is available as text below &mdash; open <em>Findings, as text</em>.</p>
+      </div>
+      <div id="stage" tabindex="0" role="application"
+           aria-label="3D walkthrough. Use left and right arrow keys to change scene, or read the text findings below."></div>
+      <button id="navprev" class="nav prev" aria-label="Previous">
+        <span>&#8249;</span></button>
+      <button id="navnext" class="nav next" aria-label="Next">
+        <span>&#8250;</span><b id="navhint"></b></button>
+      <div id="cpsum" class="cpsum" hidden></div>
+      <div id="remedy" class="remedy" hidden>
+        <button id="remedybtn" class="prim">Autonomously remediate</button>
+        <span id="remedystate"></span>
+      </div>
+      <div id="ispanel" class="ispanel" hidden>
+        <div class="ishead">
+          <div>
+            <b id="istotal"></b>
+            <span id="issub"></span>
+          </div>
+          <p id="ispop" class="ispop"></p>
+          <div class="budget">
+            <label for="budgetin">Budget</label>
+            <input id="budgetin" type="range" min="0" max="9" step="1"
+                   value="4" aria-label="Quarterly budget">
+            <b id="budgetval">$10,000</b>
+          </div>
+          <p id="budgetout" class="budgetout"></p>
+          <div class="isfilters" role="group" aria-label="Filter issues">
+            <button data-f="all" class="on">All</button>
+            <button data-f="move">Free</button>
+            <button data-f="build">Build</button>
+            <button data-f="combined">Combined</button>
+            <button id="issort" title="Sort by cost per m² returned">ROI</button>
+            <button id="iscopy" title="Copy the worklist as CSV">Copy</button>
+          </div>
+        </div>
+        <ul id="islist" class="islist"></ul>
+      </div>
+      <div id="wo" class="wo" hidden role="dialog" aria-labelledby="woh">
+        <div class="wocard">
+          <button id="woclose" class="cpx" aria-label="Close">&times;</button>
+          <div class="wohead">
+            <span>WORK ORDER</span>
+            <b id="woid"></b>
+          </div>
+          <h3 id="woh"></h3>
+          <canvas id="woshot" width="440" height="200"></canvas>
+          <dl id="wobody"></dl>
+          <p class="wonote">Cost is an illustrative order-of-magnitude
+            figure for demonstration, not a quotation. Position is in
+            building coordinates from the model origin.</p>
+          <div class="wobtns">
+            <button id="woprint" class="prim">Print / save as PDF</button>
+            <button id="wocopy">Copy as text</button>
+          </div>
+        </div>
+      </div>
+      <div id="cppop" class="cppop" hidden role="dialog"
+           aria-labelledby="cptitle" tabindex="-1">
+        <button id="cpclose" class="cpx" aria-label="Close">&times;</button>
+        <div class="cpv" id="cpverdict"></div>
+        <h4 id="cptitle"></h4>
+        <p id="cpdetail"></p>
+        <dl id="cpfacts"></dl>
+        <p class="cpnote">Cost is an illustrative order-of-magnitude
+          figure for demonstration, not a quote.</p>
+      </div>
+      <div class="progress"><i id="bar"></i></div>
+      <div class="block">
+        <div class="no" id="sceneno">01 / 11</div>
+        <div>
+          <h2 id="kicker" class="fade">Access-Twin</h2>
+          <p id="caption" class="fade">Loading…</p>
+        </div>
+      </div>
+    </div>
+
+    <aside class="rail">
+      <div class="card">
+        <h3>Floor reached, by body</h3>
+        <div id="chips"></div>
+      </div>
+      <div class="card stat">
+        <span class="n" id="statn">—</span>
+        <span class="l" id="statl">—</span>
+      </div>
+      <div class="card" id="widthcard" hidden>
+        <h3>Body width</h3>
+        <div class="wrow">
+          <input id="widthslider" type="range" min="0" max="15" value="0"
+                 step="1" aria-label="Body width in inches">
+          <b id="widthval">18&Prime;</b>
+        </div>
+        <div id="roomstate" class="legend"></div>
+      </div>
+      <div class="card">
+        <h3>Exclusion map key</h3>
+        <div class="legend">
+          <span><i style="background:var(--ok)"></i>all four bodies</span>
+          <span><i style="background:#8C9B45"></i>three of four</span>
+          <span><i style="background:var(--warn)"></i>two of four</span>
+          <span><i style="background:var(--bad)"></i>walking adult only</span>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <p id="live" class="sr" role="status" aria-live="polite"></p>
+
+  <details id="findings" class="tx">
+    <summary>Findings, as text</summary>
+    <div id="txbody"></div>
+  </details>
+
+  <footer class="foot">
+    <button id="inspect" class="prim">Inspect issues</button>
+    <button id="play">Pause</button>
+    <button id="restart">Restart</button>
+    <button id="prev">&larr;</button>
+    <button id="next">&rarr;</button>
+    <span>drag to orbit · scroll to zoom · <kbd>Space</kbd> pause
+      · <kbd>&larr;</kbd><kbd>&rarr;</kbd> scenes · <kbd>1</kbd>&ndash;<kbd>9</kbd>
+      jump · <kbd>R</kbd> restart</span>
+    <span class="sp" id="run"></span>
+  </footer>
+</div>
