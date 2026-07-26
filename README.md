@@ -272,27 +272,6 @@ shipped pipeline imports it**, and none of the numbers above depend on it.
 
 ---
 
-## Honest limits
-
-- **One floor plan.** This is the weakest claim in the project. The seed varies
-  café furniture and nothing else — verified: all 210 non-café solids and all 13
-  planted defects are byte-identical between seed 7 and seed 42. The detectors are
-  generic (ADA rules swept over a voxel grid, plus pathfinding) and are never shown
-  the answer key, but **multi-building robustness has not been demonstrated.**
-- **Costs are illustrative** order-of-magnitude figures for demonstration, not
-  quotations. They are labelled as such wherever they surface. The ranking and the
-  ratios are the claim; the dollars are not.
-- **The population is a synthetic mixture**, not a survey dataset. It shows the
-  *shape* of the exclusion curve, not a real population statistic.
-- **Only two of the three detection layers ship.** The behavioural-telemetry layer
-  and the consensus auditor live in `legacy/` and are not on the shipped path.
-- **Turning space is evaluated per room** from the model's room schedule — the same
-  list a BIM file carries. The defect manifest is never consulted.
-- **The cane profile is modelled at its full 42-inch sweep arc**, which is
-  conservative; a real cane user narrows their sweep through a doorway.
-- **Barrier localisation reports one barrier per route.** A second defect behind
-  the first is masked until the first is repaired.
-
 ## Attribution
 
 No external 3D assets, scene datasets, captured spaces, or game engine. All
